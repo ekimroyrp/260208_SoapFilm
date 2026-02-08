@@ -11,7 +11,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "lil-gui": "0.21.0",
     "three": "0.182.0"
   },
   "devDependencies": {

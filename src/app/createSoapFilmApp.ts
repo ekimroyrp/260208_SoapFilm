@@ -1,4 +1,3 @@
-import GUI from 'lil-gui';
 import {
   ACESFilmicToneMapping,
   AmbientLight,
@@ -63,6 +62,29 @@ interface UiState {
   showWireframe: boolean;
 }
 
+interface UiElements {
+  panel: HTMLDivElement;
+  handleTop: HTMLDivElement;
+  handleBottom: HTMLDivElement;
+  collapseToggle: HTMLButtonElement;
+  addCircleButton: HTMLButtonElement;
+  addRectangleButton: HTMLButtonElement;
+  rebuildFilmButton: HTMLButtonElement;
+  transformModeSelect: HTMLSelectElement;
+  solverQualitySelect: HTMLSelectElement;
+  relaxationStrengthRange: HTMLInputElement;
+  relaxationStrengthValue: HTMLSpanElement;
+  shapeRetentionRange: HTMLInputElement;
+  shapeRetentionValue: HTMLSpanElement;
+  wireframeToggle: HTMLInputElement;
+}
+
+interface UiRangeBinding {
+  input: HTMLInputElement;
+  value: HTMLSpanElement;
+  format: (value: number) => string;
+}
+
 interface FrameClipboardData {
   type: FrameType;
   radius: number;
@@ -125,10 +147,12 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private readonly orbitControls: OrbitControls;
   private readonly transformControls: TransformControls;
   private readonly transformControlsHelper: Object3D;
-  private readonly gui: GUI;
+  private readonly uiElements: UiElements;
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly boundarySampleScratch = new Vector3();
+  private readonly uiCleanupCallbacks: Array<() => void> = [];
+  private readonly uiRangeBindings: UiRangeBinding[] = [];
 
   private readonly frameEntities = new Map<string, FrameEntity>();
   private readonly frameSelectable = new Set<Object3D>();
@@ -203,8 +227,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.setupSceneHelpers();
     this.setupEnvironment();
 
-    this.gui = new GUI({ title: 'Soap Film Controls', width: 320 });
-    this.setupGui();
+    this.uiElements = this.resolveUiElements();
+    this.setupUi();
 
     this.onResizeBound = () => this.handleResize();
     this.onPointerDownBound = (event) => this.handlePointerDown(event);
@@ -409,7 +433,11 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.canvas.removeEventListener('pointerdown', this.onPointerDownBound);
     window.removeEventListener('keydown', this.onKeyDownBound);
 
-    this.gui.destroy();
+    for (const cleanup of this.uiCleanupCallbacks) {
+      cleanup();
+    }
+    this.uiCleanupCallbacks.length = 0;
+
     this.scene.remove(this.transformControlsHelper);
     this.transformControls.dispose();
     this.orbitControls.dispose();
@@ -452,60 +480,268 @@ class SoapFilmAppImpl implements SoapFilmApp {
     pmremGenerator.dispose();
   }
 
-  private setupGui(): void {
-    const actions = {
-      addCircle: () => this.addFrame('circle'),
-      addRectangle: () => this.addFrame('rectangle'),
-      rebuildFilm: () => this.rebuildFilm(),
+  private resolveUiElements(): UiElements {
+    const panel = document.getElementById('ui-panel');
+    const handleTop = document.getElementById('ui-handle');
+    const handleBottom = document.getElementById('ui-handle-bottom');
+    const collapseToggle = document.getElementById('collapse-toggle');
+    const addCircleButton = document.getElementById('add-circle');
+    const addRectangleButton = document.getElementById('add-rectangle');
+    const rebuildFilmButton = document.getElementById('rebuild-film');
+    const transformModeSelect = document.getElementById('transform-mode');
+    const solverQualitySelect = document.getElementById('solver-quality');
+    const relaxationStrengthRange = document.getElementById('relaxation-strength');
+    const relaxationStrengthValue = document.getElementById('relaxation-strength-value');
+    const shapeRetentionRange = document.getElementById('shape-retention');
+    const shapeRetentionValue = document.getElementById('shape-retention-value');
+    const wireframeToggle = document.getElementById('show-wireframe');
+
+    if (
+      !(panel instanceof HTMLDivElement) ||
+      !(handleTop instanceof HTMLDivElement) ||
+      !(handleBottom instanceof HTMLDivElement) ||
+      !(collapseToggle instanceof HTMLButtonElement) ||
+      !(addCircleButton instanceof HTMLButtonElement) ||
+      !(addRectangleButton instanceof HTMLButtonElement) ||
+      !(rebuildFilmButton instanceof HTMLButtonElement) ||
+      !(transformModeSelect instanceof HTMLSelectElement) ||
+      !(solverQualitySelect instanceof HTMLSelectElement) ||
+      !(relaxationStrengthRange instanceof HTMLInputElement) ||
+      !(relaxationStrengthValue instanceof HTMLSpanElement) ||
+      !(shapeRetentionRange instanceof HTMLInputElement) ||
+      !(shapeRetentionValue instanceof HTMLSpanElement) ||
+      !(wireframeToggle instanceof HTMLInputElement)
+    ) {
+      throw new Error('UI elements for controls panel are missing or invalid.');
+    }
+
+    return {
+      panel,
+      handleTop,
+      handleBottom,
+      collapseToggle,
+      addCircleButton,
+      addRectangleButton,
+      rebuildFilmButton,
+      transformModeSelect,
+      solverQualitySelect,
+      relaxationStrengthRange,
+      relaxationStrengthValue,
+      shapeRetentionRange,
+      shapeRetentionValue,
+      wireframeToggle,
+    };
+  }
+
+  private setupUi(): void {
+    this.uiElements.transformModeSelect.value = this.uiState.transformMode;
+    this.uiElements.solverQualitySelect.value = this.uiState.solverQuality;
+    this.uiElements.wireframeToggle.checked = this.uiState.showWireframe;
+
+    this.bindRangeControl(
+      {
+        input: this.uiElements.relaxationStrengthRange,
+        value: this.uiElements.relaxationStrengthValue,
+        format: (value) => value.toFixed(2),
+      },
+      (value) => {
+        this.uiState.relaxationStrength = value;
+        if (this.filmRuntime) {
+          this.applySolverQualityConfig();
+        }
+      },
+      this.uiState.relaxationStrength,
+    );
+
+    this.bindRangeControl(
+      {
+        input: this.uiElements.shapeRetentionRange,
+        value: this.uiElements.shapeRetentionValue,
+        format: (value) => value.toFixed(2),
+      },
+      (value) => {
+        this.uiState.shapeRetention = value;
+        if (this.filmRuntime) {
+          this.applySolverQualityConfig();
+        }
+      },
+      this.uiState.shapeRetention,
+    );
+
+    this.addDomListener(this.uiElements.addCircleButton, 'click', () => this.addFrame('circle'));
+    this.addDomListener(this.uiElements.addRectangleButton, 'click', () => this.addFrame('rectangle'));
+    this.addDomListener(this.uiElements.rebuildFilmButton, 'click', () => this.rebuildFilm());
+
+    this.addDomListener(this.uiElements.transformModeSelect, 'change', () => {
+      const mode = this.uiElements.transformModeSelect.value as UiState['transformMode'];
+      if (mode === 'translate' || mode === 'rotate' || mode === 'scale') {
+        this.setTransformMode(mode);
+      }
+    });
+
+    this.addDomListener(this.uiElements.solverQualitySelect, 'change', () => {
+      const quality = this.uiElements.solverQualitySelect.value as UiState['solverQuality'];
+      if (quality === 'fast' || quality === 'balanced' || quality === 'high') {
+        this.uiState.solverQuality = quality;
+        if (this.filmRuntime) {
+          this.applySolverQualityConfig();
+        }
+      }
+    });
+
+    this.addDomListener(this.uiElements.wireframeToggle, 'change', () => {
+      this.uiState.showWireframe = this.uiElements.wireframeToggle.checked;
+      if (this.filmRuntime) {
+        this.filmRuntime.wireframeMesh.visible = this.uiState.showWireframe;
+      }
+    });
+
+    this.setupUiPanelInteractions();
+    this.refreshAllRangeProgress();
+  }
+
+  private setupUiPanelInteractions(): void {
+    const { panel, handleTop, handleBottom, collapseToggle } = this.uiElements;
+    let dragOffset: { x: number; y: number } | null = null;
+
+    this.addDomListener(collapseToggle, 'pointerdown', (event) => {
+      event.stopPropagation();
+    });
+
+    this.addDomListener(collapseToggle, 'click', () => {
+      const collapsed = panel.classList.toggle('is-collapsed');
+      collapseToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      this.clampPanelToViewport();
+      requestAnimationFrame(() => this.refreshAllRangeProgress());
+    });
+
+    const sectionHeadings = panel.querySelectorAll<HTMLButtonElement>('.panel-section .panel-heading');
+    for (const heading of sectionHeadings) {
+      this.addDomListener(heading, 'click', () => {
+        const section = heading.closest('.panel-section');
+        if (!section) {
+          return;
+        }
+        const collapsed = section.classList.toggle('is-collapsed');
+        heading.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        this.clampPanelToViewport();
+        requestAnimationFrame(() => this.refreshAllRangeProgress());
+      });
+    }
+
+    const startDrag = (event: Event): void => {
+      const pointerEvent = event as PointerEvent;
+      const target = pointerEvent.target;
+      if (target instanceof Element && target.closest('.collapse-button')) {
+        return;
+      }
+      const currentTarget = pointerEvent.currentTarget;
+      if (!(currentTarget instanceof Element)) {
+        return;
+      }
+      if ('setPointerCapture' in currentTarget) {
+        (currentTarget as HTMLElement).setPointerCapture(pointerEvent.pointerId);
+      }
+      dragOffset = {
+        x: pointerEvent.clientX - panel.offsetLeft,
+        y: pointerEvent.clientY - panel.offsetTop,
+      };
     };
 
-    this.gui.add(actions, 'addCircle').name('Add Circle Frame');
-    this.gui.add(actions, 'addRectangle').name('Add Rectangle Frame');
-    this.gui.add(actions, 'rebuildFilm').name('Rebuild Film');
+    const moveDrag = (event: Event): void => {
+      const pointerEvent = event as PointerEvent;
+      if (!dragOffset) {
+        return;
+      }
+      const margin = 10;
+      const nextX = Math.max(
+        margin,
+        Math.min(window.innerWidth - panel.offsetWidth - margin, pointerEvent.clientX - dragOffset.x),
+      );
+      const nextY = Math.max(margin, pointerEvent.clientY - dragOffset.y);
+      panel.style.left = `${nextX}px`;
+      panel.style.top = `${nextY}px`;
+      this.clampPanelToViewport();
+    };
 
-    this.gui
-      .add(this.uiState, 'transformMode', ['translate', 'rotate', 'scale'])
-      .name('Transform Mode')
-      .onChange((mode: UiState['transformMode']) => {
-        this.setTransformMode(mode);
-      });
+    const endDrag = (): void => {
+      dragOffset = null;
+    };
 
-    this.gui
-      .add(this.uiState, 'solverQuality', ['fast', 'balanced', 'high'])
-      .name('Solver Quality')
-      .onChange(() => {
-        if (this.filmRuntime) {
-          this.applySolverQualityConfig();
-        }
-      });
+    const dragTargets = [handleTop, handleBottom];
+    for (const dragTarget of dragTargets) {
+      this.addDomListener(dragTarget, 'pointerdown', startDrag);
+      this.addDomListener(dragTarget, 'pointermove', moveDrag);
+      this.addDomListener(dragTarget, 'pointerup', endDrag);
+      this.addDomListener(dragTarget, 'pointercancel', endDrag);
+    }
 
-    this.gui
-      .add(this.uiState, 'relaxationStrength', 0.05, 2, 0.01)
-      .name('Relaxation Strength')
-      .onChange(() => {
-        if (this.filmRuntime) {
-          this.applySolverQualityConfig();
-        }
-      });
+    this.clampPanelToViewport();
+  }
 
-    this.gui
-      .add(this.uiState, 'shapeRetention', 0, 0.5, 0.01)
-      .name('Shape Retention')
-      .onChange(() => {
-        if (this.filmRuntime) {
-          this.applySolverQualityConfig();
-        }
-      });
+  private bindRangeControl(binding: UiRangeBinding, onChange: (value: number) => void, initialValue: number): void {
+    this.uiRangeBindings.push(binding);
+    binding.input.value = String(initialValue);
+    const update = (): void => {
+      const value = Number(binding.input.value);
+      binding.value.textContent = binding.format(value);
+      this.setRangeProgress(binding.input);
+      onChange(value);
+    };
+    this.addDomListener(binding.input, 'input', update);
+    update();
+  }
 
-    this.gui
-      .add(this.uiState, 'showWireframe')
-      .name('Show Wireframe')
-      .onChange((value: boolean) => {
-        if (this.filmRuntime) {
-          this.filmRuntime.wireframeMesh.visible = value;
-        }
-      });
+  private setRangeProgress(input: HTMLInputElement): void {
+    const min = Number(input.min);
+    const max = Number(input.max);
+    const value = Number(input.value);
+    const span = max - min;
+    const percent = span <= 0 ? 0 : (value - min) / span;
+    const thumbSize = 16;
+    const trackWidth = input.clientWidth || 1;
+    const usable = Math.max(trackWidth - thumbSize, 1);
+    const px = percent * usable + thumbSize * 0.5;
+    input.style.setProperty('--range-progress', `${px}px`);
+  }
 
+  private refreshAllRangeProgress(): void {
+    for (const binding of this.uiRangeBindings) {
+      this.setRangeProgress(binding.input);
+    }
+  }
+
+  private clampPanelToViewport(): void {
+    const { panel, handleTop, handleBottom } = this.uiElements;
+    const margin = 10;
+
+    const minHeight = handleTop.offsetHeight + handleBottom.offsetHeight + 40;
+    const maxTop = Math.max(margin, window.innerHeight - minHeight - margin);
+    const clampedTop = Math.min(Math.max(panel.offsetTop, margin), maxTop);
+    if (clampedTop !== panel.offsetTop) {
+      panel.style.top = `${clampedTop}px`;
+    }
+
+    const availableHeight = window.innerHeight - clampedTop - margin;
+    panel.style.maxHeight = `${Math.max(availableHeight, minHeight)}px`;
+
+    const maxLeft = Math.max(margin, window.innerWidth - panel.offsetWidth - margin);
+    const clampedLeft = Math.min(Math.max(panel.offsetLeft, margin), maxLeft);
+    if (clampedLeft !== panel.offsetLeft) {
+      panel.style.left = `${clampedLeft}px`;
+    }
+  }
+
+  private addDomListener(
+    target: EventTarget,
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: AddEventListenerOptions | boolean,
+  ): void {
+    target.addEventListener(type, listener, options);
+    this.uiCleanupCallbacks.push(() => {
+      target.removeEventListener(type, listener, options);
+    });
   }
 
   private handleResize(): void {
@@ -514,6 +750,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
+    this.clampPanelToViewport();
+    this.refreshAllRangeProgress();
   }
 
   private handlePointerDown(event: PointerEvent): void {
@@ -690,6 +928,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
   private setTransformMode(mode: UiState['transformMode']): void {
     this.uiState.transformMode = mode;
+    if (this.uiElements.transformModeSelect.value !== mode) {
+      this.uiElements.transformModeSelect.value = mode;
+    }
     this.transformControls.setMode(mode);
     this.transformControls.setSpace('local');
   }

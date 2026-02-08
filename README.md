@@ -5,11 +5,11 @@
 ## Features
 
 - Vite + TypeScript + Three.js app scaffold
-- Add circle and rectangle frames from an in-app GUI
+- Add circle and rectangle frames from a custom draggable/collapsible in-app control panel
 - Frame selection and 3D transform controls (move/rotate/scale)
 - Connected film network generated from frame MST strip topology
 - Continuous relaxation solver with fixed boundary constraints
-- Reset simulation and explicit rebuild controls
+- Explicit rebuild control for topology regeneration
 - Transparent iridescent soap-film material using `MeshPhysicalMaterial`
 - Optional wireframe debug overlay
 - Unit and regression tests for sampling, MST, topology, and solver behavior
@@ -28,7 +28,7 @@
 
 ## Controls
 
-- GUI:
+- UI panel:
   - `Add Circle Frame`
   - `Add Rectangle Frame`
   - `Rebuild Film`
@@ -39,11 +39,11 @@
   - `Show Wireframe`
 - Mouse:
   - Left-click selects a frame
+  - Left-click empty space deselects the current frame
   - Middle mouse button pans the camera
   - Right mouse button orbits the camera
   - Mouse wheel zooms
   - Drag transform gizmo handles to move/rotate/scale
-  - Empty-space clicks keep current selection (press `Escape` to deselect)
 - Keyboard:
   - `W` translate mode
   - `E` rotate mode
