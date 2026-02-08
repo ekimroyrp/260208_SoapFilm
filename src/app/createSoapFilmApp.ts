@@ -52,6 +52,7 @@ interface FilmRuntime {
   wireframeMesh: Mesh;
   material: MeshPhysicalMaterial;
   wireframeMaterial: MeshBasicMaterial;
+  oilTimeUniform: { value: number };
 }
 
 interface UiState {
@@ -187,6 +188,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private isTransformDragging = false;
   private isUsingTransformControls = false;
   private geometryUpdateCounter = 0;
+  private lastAnimationTimeSeconds = performance.now() * 0.001;
 
   private animationFrameHandle = 0;
   private readonly onResizeBound: () => void;
@@ -385,22 +387,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
     geometry.setIndex(new BufferAttribute(filmState.indices, 1));
     geometry.computeVertexNormals();
 
-    const material = new MeshPhysicalMaterial({
-      color: 0xbdd7ff,
-      transparent: true,
-      opacity: 0.45,
-      transmission: 1,
-      thickness: 0.02,
-      ior: 1.33,
-      roughness: 0.08,
-      metalness: 0,
-      iridescence: 1,
-      iridescenceIOR: 1.3,
-      iridescenceThicknessRange: [100, 400],
-      side: DoubleSide,
-      clearcoat: 0.4,
-      clearcoatRoughness: 0.12,
-    });
+    const { material, oilTimeUniform } = this.createSoapFilmMaterial();
 
     const mesh = new Mesh(geometry, material);
     mesh.castShadow = false;
@@ -430,6 +417,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
       wireframeMesh,
       material,
       wireframeMaterial,
+      oilTimeUniform,
     };
 
     runRelaxationStep(
@@ -908,11 +896,15 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
   private animationLoop = (): void => {
     this.animationFrameHandle = requestAnimationFrame(this.animationLoop);
+    const nowSeconds = performance.now() * 0.001;
+    const deltaSeconds = Math.min(0.05, Math.max(0.001, nowSeconds - this.lastAnimationTimeSeconds));
+    this.lastAnimationTimeSeconds = nowSeconds;
 
     this.orbitControls.update();
     this.updateFrameWorldMatrices();
 
     if (this.filmRuntime) {
+      this.filmRuntime.oilTimeUniform.value += deltaSeconds;
       this.applySolverQualityConfig();
       const quality = SOLVER_QUALITY_CONFIGS[this.uiState.solverQuality];
 
@@ -1034,6 +1026,74 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.filmRuntime.wireframeMaterial.dispose();
 
     this.filmRuntime = null;
+  }
+
+  private createSoapFilmMaterial(): { material: MeshPhysicalMaterial; oilTimeUniform: { value: number } } {
+    const material = new MeshPhysicalMaterial({
+      color: 0xd5e4f8,
+      transparent: true,
+      opacity: 0.39,
+      transmission: 1,
+      thickness: 0.018,
+      ior: 1.33,
+      roughness: 0.035,
+      metalness: 0,
+      envMapIntensity: 0.92,
+      iridescence: 1,
+      iridescenceIOR: 1.45,
+      iridescenceThicknessRange: [80, 1200],
+      side: DoubleSide,
+      clearcoat: 0.75,
+      clearcoatRoughness: 0.06,
+    });
+
+    const oilTimeUniform = { value: 0 };
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uOilTime = oilTimeUniform;
+
+      shader.vertexShader =
+        `
+varying vec3 vSoapWorldPos;
+` + shader.vertexShader;
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <worldpos_vertex>',
+        `
+#include <worldpos_vertex>
+vSoapWorldPos = worldPosition.xyz;
+`,
+      );
+
+      shader.fragmentShader =
+        `
+uniform float uOilTime;
+varying vec3 vSoapWorldPos;
+
+vec3 soapSpectrum(float t) {
+  return clamp(abs(mod(t * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+}
+` + shader.fragmentShader;
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `
+#include <opaque_fragment>
+vec3 soapViewDir = normalize(vViewPosition);
+float soapFresnel = pow(1.0 - clamp(dot(normalize(normal), soapViewDir), 0.0, 1.0), 2.25);
+float soapSwirlA = sin(vSoapWorldPos.x * 0.55 + vSoapWorldPos.y * 0.4 - vSoapWorldPos.z * 0.48 + uOilTime * 0.08) * 0.5 + 0.5;
+float soapSwirlB = sin((vSoapWorldPos.x + vSoapWorldPos.y + vSoapWorldPos.z) * 0.95 - uOilTime * 0.055) * 0.5 + 0.5;
+float soapHue = fract(soapSwirlA * 0.68 + soapSwirlB * 0.32 + soapFresnel * 0.22 + uOilTime * 0.0018);
+vec3 soapTint = soapSpectrum(soapHue);
+float soapAmount = (0.04 + 0.3 * soapFresnel) * (0.48 + 0.22 * soapSwirlB);
+gl_FragColor.rgb += soapTint * soapAmount * 0.7;
+`,
+      );
+    };
+
+    material.customProgramCacheKey = () => 'soap-film-oily-v1';
+    material.needsUpdate = true;
+
+    return { material, oilTimeUniform };
   }
 }
 

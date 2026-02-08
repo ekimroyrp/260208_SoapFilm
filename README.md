@@ -11,7 +11,7 @@
 - Continuous relaxation solver with fixed boundary constraints
 - Solver controls for quality, speed, strength, and retention
 - Reset control for rebuilding the film from the current frame layout
-- Transparent iridescent soap-film material using `MeshPhysicalMaterial`
+- Transparent iridescent soap-film material using `MeshPhysicalMaterial` with a lightweight oily-rainbow enhancement
 - Optional wireframe debug overlay
 - Unit and regression tests for sampling, MST, topology, and solver behavior
 
