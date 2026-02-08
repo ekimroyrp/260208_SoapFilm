@@ -31,7 +31,6 @@
 - GUI:
   - `Add Circle Frame`
   - `Add Rectangle Frame`
-  - `Reset Simulation`
   - `Rebuild Film`
   - `Transform Mode` (`translate`, `rotate`, `scale`)
   - `Solver Quality` (`fast`, `balanced`, `high`)
@@ -49,5 +48,7 @@
   - `W` translate mode
   - `E` rotate mode
   - `R` scale mode
+  - `Ctrl+C` copy selected frame (`Cmd+C` on macOS)
+  - `Ctrl+V` paste copied frame (`Cmd+V` on macOS)
   - `Delete` remove selected frame
   - `Escape` deselect current frame

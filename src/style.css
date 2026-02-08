@@ -13,7 +13,7 @@ body,
 }
 
 body {
-  background: radial-gradient(circle at top, #1e2833 0%, #090d12 70%);
+  background: #000;
 }
 
 #app-canvas {

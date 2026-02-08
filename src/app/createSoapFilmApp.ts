@@ -2,14 +2,12 @@ import GUI from 'lil-gui';
 import {
   ACESFilmicToneMapping,
   AmbientLight,
-  AxesHelper,
   BufferAttribute,
   BufferGeometry,
   Color,
   DirectionalLight,
   DoubleSide,
   DynamicDrawUsage,
-  GridHelper,
   LineBasicMaterial,
   LineLoop,
   Mesh,
@@ -31,7 +29,7 @@ import {
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import type { BoundaryConstraint, FilmState, FrameType, SoapFilmApp, SolverConfig } from '../types';
+import type { BoundaryConstraint, FilmState, FrameState, FrameType, SoapFilmApp, SolverConfig } from '../types';
 import { createDefaultFrameState, sampleFrameBoundaryLocal, sampleFramePointLocal } from '../core/frameSampling';
 import { buildFilmTopology, type FrameRuntime } from '../core/filmTopology';
 import {
@@ -63,6 +61,17 @@ interface UiState {
   relaxationStrength: number;
   shapeRetention: number;
   showWireframe: boolean;
+}
+
+interface FrameClipboardData {
+  type: FrameType;
+  radius: number;
+  width: number;
+  height: number;
+  boundarySamples: number;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
 }
 
 interface SolverQualityConfig extends SolverConfig {
@@ -124,6 +133,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private readonly frameEntities = new Map<string, FrameEntity>();
   private readonly frameSelectable = new Set<Object3D>();
   private selectedFrameId: string | null = null;
+  private frameClipboard: FrameClipboardData | null = null;
   private frameIdCounter = 0;
 
   private filmRuntime: FilmRuntime | null = null;
@@ -148,7 +158,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.scene = new Scene();
-    this.scene.background = new Color(0x101722);
+    this.scene.background = new Color(0x000000);
 
     this.renderer = new WebGLRenderer({ canvas: this.canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -221,35 +231,40 @@ class SoapFilmAppImpl implements SoapFilmApp {
     state.position.set(placement[0], placement[1], placement[2]);
     state.rotation.set(0, (this.frameEntities.size * Math.PI) / 8, 0);
 
+    return this.addFrameFromState(state);
+  }
+
+  private addFrameFromState(state: FrameState): string {
+    const frameEntity = this.createFrameEntity(state);
+    this.frameEntities.set(state.id, frameEntity);
+    this.frameSelectable.add(frameEntity.line);
+    this.selectFrame(state.id);
+    this.rebuildFilm();
+    return state.id;
+  }
+
+  private createFrameEntity(state: FrameState): FrameEntity {
     const object = new Object3D();
     object.position.copy(state.position);
     object.rotation.copy(state.rotation);
     object.scale.copy(state.scale);
 
     const lineGeometry = new BufferGeometry().setFromPoints(sampleFrameBoundaryLocal(state, state.boundarySamples));
-    const lineMaterial = new LineBasicMaterial({ color: 0xd22e2e });
+    const lineMaterial = new LineBasicMaterial({ color: 0xffffff });
     const line = new LineLoop(lineGeometry, lineMaterial);
-    line.userData.frameId = id;
+    line.userData.frameId = state.id;
     line.renderOrder = 5;
 
     object.add(line);
     this.scene.add(object);
 
-    const frameEntity: FrameEntity = {
-      id,
+    return {
+      id: state.id,
       state,
       object,
       line,
       material: lineMaterial,
     };
-
-    this.frameEntities.set(id, frameEntity);
-    this.frameSelectable.add(line);
-
-    this.selectFrame(id);
-    this.rebuildFilm();
-
-    return id;
   }
 
   removeFrame(frameId: string): void {
@@ -281,7 +296,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.selectedFrameId = frameId;
 
     for (const [id, frameEntity] of this.frameEntities) {
-      frameEntity.material.color.setHex(id === frameId ? 0xffc85c : 0xd22e2e);
+      frameEntity.material.color.setHex(id === frameId ? 0x00ffff : 0xffffff);
     }
 
     this.transformControls.detach();
@@ -424,12 +439,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const directional = new DirectionalLight(0xffffff, 1.15);
     directional.position.set(8, 10, 4);
     this.scene.add(directional);
-
-    const grid = new GridHelper(26, 52, 0x3f4f63, 0x253243);
-    this.scene.add(grid);
-
-    const axes = new AxesHelper(1.4);
-    this.scene.add(axes);
   }
 
   private setupEnvironment(): void {
@@ -446,13 +455,11 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const actions = {
       addCircle: () => this.addFrame('circle'),
       addRectangle: () => this.addFrame('rectangle'),
-      resetSimulation: () => this.resetSimulation(),
       rebuildFilm: () => this.rebuildFilm(),
     };
 
     this.gui.add(actions, 'addCircle').name('Add Circle Frame');
     this.gui.add(actions, 'addRectangle').name('Add Rectangle Frame');
-    this.gui.add(actions, 'resetSimulation').name('Reset Simulation');
     this.gui.add(actions, 'rebuildFilm').name('Rebuild Film');
 
     this.gui
@@ -533,25 +540,93 @@ class SoapFilmAppImpl implements SoapFilmApp {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
-    if (event.key === 'w' || event.key === 'W') {
+    const hasModifier = event.ctrlKey || event.metaKey;
+    if (hasModifier) {
+      const key = event.key.toLowerCase();
+      if (key === 'c') {
+        this.copySelectedFrame();
+        event.preventDefault();
+        return;
+      }
+      if (key === 'v') {
+        this.pasteFrameFromClipboard();
+        event.preventDefault();
+        return;
+      }
+    }
+
+    if (!hasModifier && (event.key === 'w' || event.key === 'W')) {
       this.setTransformMode('translate');
     }
 
-    if (event.key === 'e' || event.key === 'E') {
+    if (!hasModifier && (event.key === 'e' || event.key === 'E')) {
       this.setTransformMode('rotate');
     }
 
-    if (event.key === 'r' || event.key === 'R') {
+    if (!hasModifier && (event.key === 'r' || event.key === 'R')) {
       this.setTransformMode('scale');
     }
 
-    if (event.key === 'Escape') {
+    if (!hasModifier && event.key === 'Escape') {
       this.selectFrame(null);
     }
 
-    if (event.key === 'Delete' && this.selectedFrameId) {
+    if (!hasModifier && event.key === 'Delete' && this.selectedFrameId) {
       this.removeFrame(this.selectedFrameId);
     }
+  }
+
+  private copySelectedFrame(): void {
+    if (!this.selectedFrameId) {
+      return;
+    }
+
+    const frameEntity = this.frameEntities.get(this.selectedFrameId);
+    if (!frameEntity) {
+      return;
+    }
+
+    frameEntity.state.position.copy(frameEntity.object.position);
+    frameEntity.state.rotation.copy(frameEntity.object.rotation);
+    frameEntity.state.scale.copy(frameEntity.object.scale);
+
+    this.frameClipboard = {
+      type: frameEntity.state.type,
+      radius: frameEntity.state.radius,
+      width: frameEntity.state.width,
+      height: frameEntity.state.height,
+      boundarySamples: frameEntity.state.boundarySamples,
+      position: [frameEntity.state.position.x, frameEntity.state.position.y, frameEntity.state.position.z],
+      rotation: [frameEntity.state.rotation.x, frameEntity.state.rotation.y, frameEntity.state.rotation.z],
+      scale: [frameEntity.state.scale.x, frameEntity.state.scale.y, frameEntity.state.scale.z],
+    };
+  }
+
+  private pasteFrameFromClipboard(): void {
+    if (!this.frameClipboard) {
+      return;
+    }
+
+    const id = `frame-${++this.frameIdCounter}`;
+    const state = createDefaultFrameState(id, this.frameClipboard.type);
+    state.radius = this.frameClipboard.radius;
+    state.width = this.frameClipboard.width;
+    state.height = this.frameClipboard.height;
+    state.boundarySamples = this.frameClipboard.boundarySamples;
+
+    state.position.set(
+      this.frameClipboard.position[0] + 0.5,
+      this.frameClipboard.position[1],
+      this.frameClipboard.position[2] + 0.5,
+    );
+    state.rotation.set(
+      this.frameClipboard.rotation[0],
+      this.frameClipboard.rotation[1],
+      this.frameClipboard.rotation[2],
+    );
+    state.scale.set(this.frameClipboard.scale[0], this.frameClipboard.scale[1], this.frameClipboard.scale[2]);
+
+    this.addFrameFromState(state);
   }
 
   private animationLoop = (): void => {
