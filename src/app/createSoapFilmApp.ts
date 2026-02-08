@@ -180,7 +180,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
     this.transformControls.setMode(this.uiState.transformMode);
-    this.transformControls.setSize(1.25);
+    this.transformControls.setSpace('local');
+    this.transformControls.setSize(0.625);
     this.transformControls.addEventListener('dragging-changed', (event) => {
       const isDragging = Boolean((event as { value?: unknown }).value);
       this.isTransformDragging = isDragging;
@@ -690,6 +691,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private setTransformMode(mode: UiState['transformMode']): void {
     this.uiState.transformMode = mode;
     this.transformControls.setMode(mode);
+    this.transformControls.setSpace('local');
   }
 
   private getActiveSolverConfig(): SolverConfig {
