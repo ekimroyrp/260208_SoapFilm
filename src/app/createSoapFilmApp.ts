@@ -60,6 +60,8 @@ interface FilmRuntime {
 interface UiState {
   transformMode: 'translate' | 'rotate' | 'scale';
   solverQuality: 'fast' | 'balanced' | 'high';
+  relaxationStrength: number;
+  shapeRetention: number;
   showWireframe: boolean;
   surfaceArea: number;
 }
@@ -84,6 +86,8 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
     stepSize: 0.16,
     damping: 0.91,
     laplacianWeight: 0.2,
+    relaxationStrength: 1,
+    shapeRetention: 0,
     normalsUpdateInterval: 4,
     areaUpdateInterval: 20,
   },
@@ -92,6 +96,8 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
     stepSize: 0.14,
     damping: 0.92,
     laplacianWeight: 0.2,
+    relaxationStrength: 1,
+    shapeRetention: 0,
     normalsUpdateInterval: 2,
     areaUpdateInterval: 12,
   },
@@ -100,6 +106,8 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
     stepSize: 0.13,
     damping: 0.93,
     laplacianWeight: 0.22,
+    relaxationStrength: 1,
+    shapeRetention: 0,
     normalsUpdateInterval: 1,
     areaUpdateInterval: 8,
   },
@@ -129,10 +137,13 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private readonly uiState: UiState = {
     transformMode: 'translate',
     solverQuality: 'balanced',
+    relaxationStrength: 1,
+    shapeRetention: 0,
     showWireframe: false,
     surfaceArea: 0,
   };
   private isTransformDragging = false;
+  private isUsingTransformControls = false;
   private geometryUpdateCounter = 0;
   private areaUpdateCounter = 0;
 
@@ -163,10 +174,19 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
     this.transformControls.setMode(this.uiState.transformMode);
+    this.transformControls.setSize(1.25);
     this.transformControls.addEventListener('dragging-changed', (event) => {
       const isDragging = Boolean((event as { value?: unknown }).value);
       this.isTransformDragging = isDragging;
       this.orbitControls.enabled = !isDragging;
+    });
+    this.transformControls.addEventListener('mouseDown', () => {
+      this.isUsingTransformControls = true;
+    });
+    this.transformControls.addEventListener('mouseUp', () => {
+      window.setTimeout(() => {
+        this.isUsingTransformControls = false;
+      }, 0);
     });
     this.transformControlsHelper = this.transformControls.getHelper();
     this.scene.add(this.transformControlsHelper);
@@ -304,7 +324,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
       return;
     }
 
-    const solverConfig = this.getActiveSolverConfig(topology.positions.length / 3);
+    const solverConfig = this.getActiveSolverConfig();
     const filmState = createFilmState(topology, solverConfig);
     const solverContext = createSolverContext(filmState);
 
@@ -435,6 +455,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const actions = {
       addCircle: () => this.addFrame('circle'),
       addRectangle: () => this.addFrame('rectangle'),
+      translateMode: () => this.setTransformMode('translate'),
+      rotateMode: () => this.setTransformMode('rotate'),
+      scaleMode: () => this.setTransformMode('scale'),
       deleteSelected: () => {
         if (this.selectedFrameId) {
           this.removeFrame(this.selectedFrameId);
@@ -446,6 +469,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     this.gui.add(actions, 'addCircle').name('Add Circle Frame');
     this.gui.add(actions, 'addRectangle').name('Add Rectangle Frame');
+    this.gui.add(actions, 'translateMode').name('Mode: Translate');
+    this.gui.add(actions, 'rotateMode').name('Mode: Rotate');
+    this.gui.add(actions, 'scaleMode').name('Mode: Scale');
     this.gui.add(actions, 'deleteSelected').name('Delete Selected Frame');
     this.gui.add(actions, 'resetSimulation').name('Reset Simulation');
     this.gui.add(actions, 'rebuildFilm').name('Rebuild Film');
@@ -454,12 +480,30 @@ class SoapFilmAppImpl implements SoapFilmApp {
       .add(this.uiState, 'transformMode', ['translate', 'rotate', 'scale'])
       .name('Transform Mode')
       .onChange((mode: UiState['transformMode']) => {
-        this.transformControls.setMode(mode);
+        this.setTransformMode(mode);
       });
 
     this.gui
       .add(this.uiState, 'solverQuality', ['fast', 'balanced', 'high'])
       .name('Solver Quality')
+      .onChange(() => {
+        if (this.filmRuntime) {
+          this.applySolverQualityConfig();
+        }
+      });
+
+    this.gui
+      .add(this.uiState, 'relaxationStrength', 0.05, 2, 0.01)
+      .name('Relaxation Strength')
+      .onChange(() => {
+        if (this.filmRuntime) {
+          this.applySolverQualityConfig();
+        }
+      });
+
+    this.gui
+      .add(this.uiState, 'shapeRetention', 0, 0.5, 0.01)
+      .name('Shape Retention')
       .onChange(() => {
         if (this.filmRuntime) {
           this.applySolverQualityConfig();
@@ -490,6 +534,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
     if (event.button !== 0) {
       return;
     }
+    if (this.isUsingTransformControls || this.isTransformDragging) {
+      return;
+    }
 
     const rect = this.canvas.getBoundingClientRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -498,7 +545,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const intersections = this.raycaster.intersectObjects(Array.from(this.frameSelectable));
     if (intersections.length === 0) {
-      this.selectFrame(null);
       return;
     }
 
@@ -509,18 +555,19 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
   private handleKeyDown(event: KeyboardEvent): void {
     if (event.key === 'w' || event.key === 'W') {
-      this.uiState.transformMode = 'translate';
-      this.transformControls.setMode('translate');
+      this.setTransformMode('translate');
     }
 
     if (event.key === 'e' || event.key === 'E') {
-      this.uiState.transformMode = 'rotate';
-      this.transformControls.setMode('rotate');
+      this.setTransformMode('rotate');
     }
 
     if (event.key === 'r' || event.key === 'R') {
-      this.uiState.transformMode = 'scale';
-      this.transformControls.setMode('scale');
+      this.setTransformMode('scale');
+    }
+
+    if (event.key === 'Escape') {
+      this.selectFrame(null);
     }
   }
 
@@ -532,6 +579,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     if (this.filmRuntime) {
       this.applySolverQualityConfig();
+      const quality = SOLVER_QUALITY_CONFIGS[this.uiState.solverQuality];
+      const areaInterval = this.isTransformDragging ? Math.max(quality.areaUpdateInterval, 24) : quality.areaUpdateInterval;
+
       runRelaxationStep(
         this.filmRuntime.state,
         this.filmRuntime.solverContext,
@@ -541,14 +591,13 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
       this.geometryUpdateCounter += 1;
       this.areaUpdateCounter += 1;
-      const quality = SOLVER_QUALITY_CONFIGS[this.uiState.solverQuality];
+
       const normalsInterval = this.isTransformDragging
         ? Math.max(quality.normalsUpdateInterval, 4)
         : quality.normalsUpdateInterval;
       const shouldRefreshNormals = this.geometryUpdateCounter % normalsInterval === 0;
       this.refreshFilmGeometry(shouldRefreshNormals);
 
-      const areaInterval = this.isTransformDragging ? Math.max(quality.areaUpdateInterval, 24) : quality.areaUpdateInterval;
       if (this.areaUpdateCounter % areaInterval === 0) {
         this.uiState.surfaceArea = computeSurfaceArea(this.filmRuntime.state.positions, this.filmRuntime.state.indices);
       }
@@ -586,17 +635,24 @@ class SoapFilmAppImpl implements SoapFilmApp {
     }
   }
 
-  private getActiveSolverConfig(vertexCount: number): SolverConfig {
+  private setTransformMode(mode: UiState['transformMode']): void {
+    this.uiState.transformMode = mode;
+    this.transformControls.setMode(mode);
+  }
+
+  private getActiveSolverConfig(): SolverConfig {
     const baseConfig = SOLVER_QUALITY_CONFIGS[this.uiState.solverQuality];
-    const densityScale = vertexCount > 4200 ? 0.5 : vertexCount > 2800 ? 0.75 : 1;
-    const interactivePenalty = this.isTransformDragging ? 1 : 0;
-    const substeps = Math.max(1, Math.round(baseConfig.substeps * densityScale) - interactivePenalty);
+    const substeps = baseConfig.substeps;
+    const relaxationStrength = Math.min(2, Math.max(0.05, this.uiState.relaxationStrength));
+    const shapeRetention = Math.min(0.5, Math.max(0, this.uiState.shapeRetention));
 
     return {
       substeps,
       stepSize: baseConfig.stepSize,
       damping: baseConfig.damping,
       laplacianWeight: baseConfig.laplacianWeight,
+      relaxationStrength,
+      shapeRetention,
     };
   }
 
@@ -605,8 +661,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
       return;
     }
 
-    const vertexCount = this.filmRuntime.state.positions.length / 3;
-    this.filmRuntime.state.solverConfig = this.getActiveSolverConfig(vertexCount);
+    this.filmRuntime.state.solverConfig = this.getActiveSolverConfig();
   }
 
   private syncFrameStatesFromObjects(): void {

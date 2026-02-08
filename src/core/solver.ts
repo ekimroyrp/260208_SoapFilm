@@ -17,6 +17,8 @@ const DEFAULT_SOLVER_CONFIG: SolverConfig = {
   stepSize: 0.14,
   damping: 0.92,
   laplacianWeight: 0.2,
+  relaxationStrength: 1,
+  shapeRetention: 0,
 };
 
 const EPSILON = 1e-8;
@@ -79,7 +81,9 @@ export function runRelaxationStep(
     return 0;
   }
 
-  const { substeps, stepSize, damping, laplacianWeight } = filmState.solverConfig;
+  const { substeps, stepSize, damping, laplacianWeight, relaxationStrength, shapeRetention } = filmState.solverConfig;
+  const forceScale = Math.max(0, relaxationStrength);
+  const retentionScale = Math.max(0, shapeRetention);
   for (let substep = 0; substep < substeps; substep += 1) {
     projectBoundaries(filmState, boundarySampler);
     solverContext.gradient.fill(0);
@@ -98,6 +102,9 @@ export function runRelaxationStep(
       const px = filmState.positions[offset];
       const py = filmState.positions[offset + 1];
       const pz = filmState.positions[offset + 2];
+      const rx = filmState.restPositions[offset];
+      const ry = filmState.restPositions[offset + 1];
+      const rz = filmState.restPositions[offset + 2];
 
       const gx = solverContext.gradient[offset];
       const gy = solverContext.gradient[offset + 1];
@@ -121,9 +128,9 @@ export function runRelaxationStep(
         lapZ = lapZ * invNeighbors - pz;
       }
 
-      const accelX = -gx + laplacianWeight * lapX;
-      const accelY = -gy + laplacianWeight * lapY;
-      const accelZ = -gz + laplacianWeight * lapZ;
+      const accelX = (-gx + laplacianWeight * lapX) * forceScale + (rx - px) * retentionScale;
+      const accelY = (-gy + laplacianWeight * lapY) * forceScale + (ry - py) * retentionScale;
+      const accelZ = (-gz + laplacianWeight * lapZ) * forceScale + (rz - pz) * retentionScale;
 
       const nextVelocityX = filmState.velocities[offset] * damping + accelX * stepSize;
       const nextVelocityY = filmState.velocities[offset + 1] * damping + accelY * stepSize;

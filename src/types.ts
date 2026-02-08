@@ -25,6 +25,8 @@ export interface SolverConfig {
   stepSize: number;
   damping: number;
   laplacianWeight: number;
+  relaxationStrength: number;
+  shapeRetention: number;
 }
 
 export interface FilmState {

@@ -36,12 +36,16 @@
   - `Rebuild Film`
   - `Transform Mode` (`translate`, `rotate`, `scale`)
   - `Solver Quality` (`fast`, `balanced`, `high`)
+  - `Relaxation Strength` (overall relaxation force scale)
+  - `Shape Retention` (spring toward initial film shape to resist collapse)
   - `Show Wireframe`
 - Mouse:
   - Left-click a frame to select it
   - Drag transform gizmo handles to move/rotate/scale
+  - Empty-space clicks keep current selection (press `Escape` to deselect)
   - Orbit the camera with standard Three.js OrbitControls
 - Keyboard:
   - `W` translate mode
   - `E` rotate mode
   - `R` scale mode
+  - `Escape` deselect current frame
