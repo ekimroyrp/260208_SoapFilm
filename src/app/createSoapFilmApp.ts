@@ -57,6 +57,7 @@ interface FilmRuntime {
 interface UiState {
   transformMode: 'translate' | 'rotate' | 'scale';
   solverQuality: 'fast' | 'balanced' | 'high';
+  solverSpeed: number;
   relaxationStrength: number;
   shapeRetention: number;
   showWireframe: boolean;
@@ -69,9 +70,11 @@ interface UiElements {
   collapseToggle: HTMLButtonElement;
   addCircleButton: HTMLButtonElement;
   addRectangleButton: HTMLButtonElement;
-  rebuildFilmButton: HTMLButtonElement;
+  resetSolverButton: HTMLButtonElement;
   transformModeSelect: HTMLSelectElement;
   solverQualitySelect: HTMLSelectElement;
+  solverSpeedRange: HTMLInputElement;
+  solverSpeedValue: HTMLSpanElement;
   relaxationStrengthRange: HTMLInputElement;
   relaxationStrengthValue: HTMLSpanElement;
   shapeRetentionRange: HTMLInputElement;
@@ -139,6 +142,16 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
   },
 };
 
+const DRAG_SUBSTEP_MULTIPLIER = 3;
+const DRAG_MAX_SUBSTEPS = 24;
+const DRAG_DAMPING_CAP = 0.82;
+const DRAG_STEP_SIZE_SCALE = 0.9;
+const DRAG_LAPLACIAN_SCALE = 1.2;
+const DRAG_RELAXATION_BOOST = 1.35;
+const DRAG_MAX_RELAXATION_STRENGTH = 3;
+const SOLVER_SPEED_MIN = 0.1;
+const SOLVER_SPEED_MAX = 4;
+
 class SoapFilmAppImpl implements SoapFilmApp {
   private readonly canvas: HTMLCanvasElement;
   private readonly renderer: WebGLRenderer;
@@ -166,6 +179,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private readonly uiState: UiState = {
     transformMode: 'translate',
     solverQuality: 'balanced',
+    solverSpeed: 1,
     relaxationStrength: 1,
     shapeRetention: 0,
     showWireframe: false,
@@ -210,6 +224,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
       const isDragging = Boolean((event as { value?: unknown }).value);
       this.isTransformDragging = isDragging;
       this.orbitControls.enabled = !isDragging;
+      if (isDragging && this.filmRuntime) {
+        this.filmRuntime.state.velocities.fill(0);
+      }
     });
     this.transformControls.addEventListener('mouseDown', () => {
       this.isUsingTransformControls = true;
@@ -487,9 +504,11 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const collapseToggle = document.getElementById('collapse-toggle');
     const addCircleButton = document.getElementById('add-circle');
     const addRectangleButton = document.getElementById('add-rectangle');
-    const rebuildFilmButton = document.getElementById('rebuild-film');
+    const resetSolverButton = document.getElementById('reset-solver');
     const transformModeSelect = document.getElementById('transform-mode');
     const solverQualitySelect = document.getElementById('solver-quality');
+    const solverSpeedRange = document.getElementById('solver-speed');
+    const solverSpeedValue = document.getElementById('solver-speed-value');
     const relaxationStrengthRange = document.getElementById('relaxation-strength');
     const relaxationStrengthValue = document.getElementById('relaxation-strength-value');
     const shapeRetentionRange = document.getElementById('shape-retention');
@@ -503,9 +522,11 @@ class SoapFilmAppImpl implements SoapFilmApp {
       !(collapseToggle instanceof HTMLButtonElement) ||
       !(addCircleButton instanceof HTMLButtonElement) ||
       !(addRectangleButton instanceof HTMLButtonElement) ||
-      !(rebuildFilmButton instanceof HTMLButtonElement) ||
+      !(resetSolverButton instanceof HTMLButtonElement) ||
       !(transformModeSelect instanceof HTMLSelectElement) ||
       !(solverQualitySelect instanceof HTMLSelectElement) ||
+      !(solverSpeedRange instanceof HTMLInputElement) ||
+      !(solverSpeedValue instanceof HTMLSpanElement) ||
       !(relaxationStrengthRange instanceof HTMLInputElement) ||
       !(relaxationStrengthValue instanceof HTMLSpanElement) ||
       !(shapeRetentionRange instanceof HTMLInputElement) ||
@@ -522,9 +543,11 @@ class SoapFilmAppImpl implements SoapFilmApp {
       collapseToggle,
       addCircleButton,
       addRectangleButton,
-      rebuildFilmButton,
+      resetSolverButton,
       transformModeSelect,
       solverQualitySelect,
+      solverSpeedRange,
+      solverSpeedValue,
       relaxationStrengthRange,
       relaxationStrengthValue,
       shapeRetentionRange,
@@ -537,6 +560,21 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.uiElements.transformModeSelect.value = this.uiState.transformMode;
     this.uiElements.solverQualitySelect.value = this.uiState.solverQuality;
     this.uiElements.wireframeToggle.checked = this.uiState.showWireframe;
+
+    this.bindRangeControl(
+      {
+        input: this.uiElements.solverSpeedRange,
+        value: this.uiElements.solverSpeedValue,
+        format: (value) => value.toFixed(2),
+      },
+      (value) => {
+        this.uiState.solverSpeed = value;
+        if (this.filmRuntime) {
+          this.applySolverQualityConfig();
+        }
+      },
+      this.uiState.solverSpeed,
+    );
 
     this.bindRangeControl(
       {
@@ -570,7 +608,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     this.addDomListener(this.uiElements.addCircleButton, 'click', () => this.addFrame('circle'));
     this.addDomListener(this.uiElements.addRectangleButton, 'click', () => this.addFrame('rectangle'));
-    this.addDomListener(this.uiElements.rebuildFilmButton, 'click', () => this.rebuildFilm());
+    this.addDomListener(this.uiElements.resetSolverButton, 'click', () => this.rebuildFilm());
 
     this.addDomListener(this.uiElements.transformModeSelect, 'change', () => {
       const mode = this.uiElements.transformModeSelect.value as UiState['transformMode'];
@@ -887,9 +925,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
       this.geometryUpdateCounter += 1;
 
-      const normalsInterval = this.isTransformDragging
-        ? Math.max(quality.normalsUpdateInterval, 4)
-        : quality.normalsUpdateInterval;
+      const normalsInterval = this.isTransformDragging ? 1 : quality.normalsUpdateInterval;
       const shouldRefreshNormals = this.geometryUpdateCounter % normalsInterval === 0;
       this.refreshFilmGeometry(shouldRefreshNormals);
     }
@@ -937,15 +973,33 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
   private getActiveSolverConfig(): SolverConfig {
     const baseConfig = SOLVER_QUALITY_CONFIGS[this.uiState.solverQuality];
-    const substeps = baseConfig.substeps;
-    const relaxationStrength = Math.min(2, Math.max(0.05, this.uiState.relaxationStrength));
+    const speedScale = Math.min(SOLVER_SPEED_MAX, Math.max(SOLVER_SPEED_MIN, this.uiState.solverSpeed));
+    let substeps = Math.max(1, Math.round(baseConfig.substeps * speedScale));
+    let stepSize = baseConfig.stepSize;
+    let damping = baseConfig.damping;
+    let laplacianWeight = baseConfig.laplacianWeight;
+    let relaxationStrength = Math.min(2, Math.max(0.05, this.uiState.relaxationStrength));
     const shapeRetention = Math.min(0.5, Math.max(0, this.uiState.shapeRetention));
+
+    if (this.isTransformDragging) {
+      substeps = Math.min(
+        DRAG_MAX_SUBSTEPS,
+        Math.max(baseConfig.substeps + 2, baseConfig.substeps * DRAG_SUBSTEP_MULTIPLIER),
+      );
+      stepSize = baseConfig.stepSize * DRAG_STEP_SIZE_SCALE;
+      damping = Math.min(baseConfig.damping, DRAG_DAMPING_CAP);
+      laplacianWeight = baseConfig.laplacianWeight * DRAG_LAPLACIAN_SCALE;
+      relaxationStrength = Math.min(
+        DRAG_MAX_RELAXATION_STRENGTH,
+        Math.max(0.05, relaxationStrength * DRAG_RELAXATION_BOOST),
+      );
+    }
 
     return {
       substeps,
-      stepSize: baseConfig.stepSize,
-      damping: baseConfig.damping,
-      laplacianWeight: baseConfig.laplacianWeight,
+      stepSize,
+      damping,
+      laplacianWeight,
       relaxationStrength,
       shapeRetention,
     };

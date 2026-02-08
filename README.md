@@ -9,7 +9,8 @@
 - Frame selection and 3D transform controls (move/rotate/scale)
 - Connected film network generated from frame MST strip topology
 - Continuous relaxation solver with fixed boundary constraints
-- Explicit rebuild control for topology regeneration
+- Solver controls for quality, speed, strength, and retention
+- Reset control for rebuilding the film from the current frame layout
 - Transparent iridescent soap-film material using `MeshPhysicalMaterial`
 - Optional wireframe debug overlay
 - Unit and regression tests for sampling, MST, topology, and solver behavior
@@ -29,14 +30,15 @@
 ## Controls
 
 - UI panel:
-  - `Add Circle Frame`
-  - `Add Rectangle Frame`
-  - `Rebuild Film`
-  - `Transform Mode` (`translate`, `rotate`, `scale`)
-  - `Solver Quality` (`fast`, `balanced`, `high`)
-  - `Relaxation Strength` (overall relaxation force scale)
-  - `Shape Retention` (spring toward initial film shape to resist collapse)
-  - `Show Wireframe`
+  - `Add Circle`
+  - `Add Rectangle`
+  - `Mode` (`Move`, `Rotate`, `Scale`)
+  - `Wireframe`
+  - `Quality` (`Fast`, `Balanced`, `High`)
+  - `Speed` (solver update speed scale)
+  - `Strength` (overall relaxation force scale)
+  - `Retention` (spring toward initial film shape to resist collapse)
+  - `Reset` (rebuild/restart the film from the current frame layout)
 - Mouse:
   - Left-click selects a frame
   - Left-click empty space deselects the current frame

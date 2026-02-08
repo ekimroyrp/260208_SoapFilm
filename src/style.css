@@ -6,6 +6,9 @@
   --accent: #e5f1ff;
   --shadow: rgba(3, 10, 20, 0.55);
   --border: rgba(255, 255, 255, 0.35);
+  --ui-blue-a: #2f6bff;
+  --ui-blue-b: #38cfff;
+  --ui-blue-c: #7ee9ff;
   color-scheme: dark;
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
@@ -78,7 +81,7 @@ body {
 }
 
 .collapse-button {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07));
+  background: linear-gradient(135deg, rgba(47, 107, 255, 0.35), rgba(56, 207, 255, 0.22));
   color: var(--text);
   width: 26px;
   height: 22px;
@@ -253,7 +256,7 @@ body {
 }
 
 .switch input:checked + .slider {
-  background: linear-gradient(135deg, #35d27d, #98f7b4);
+  background: linear-gradient(135deg, var(--ui-blue-a), var(--ui-blue-c));
 }
 
 .switch input:checked + .slider::before {
@@ -269,8 +272,8 @@ input[type="range"] {
   border-radius: 999px;
   background: linear-gradient(
     90deg,
-    #35d27d 0px,
-    #98f7b4 var(--range-progress, 50px),
+    var(--ui-blue-a) 0px,
+    var(--ui-blue-b) var(--range-progress, 50px),
     rgba(255, 255, 255, 0.12) var(--range-progress, 50px),
     rgba(255, 255, 255, 0.12) 100%
   );
@@ -333,7 +336,7 @@ input[type="range"]::-moz-range-track {
   width: 100%;
   height: 34px;
   border-radius: 10px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07));
+  background: linear-gradient(135deg, rgba(47, 107, 255, 0.26), rgba(56, 207, 255, 0.14));
   color: var(--text);
   font-weight: 500;
   letter-spacing: 0.02em;
@@ -349,8 +352,8 @@ input[type="range"]::-moz-range-track {
 }
 
 .pill-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, #35d27d, #98f7b4);
-  color: #1b1b1b;
+  background: linear-gradient(135deg, var(--ui-blue-a), var(--ui-blue-c));
+  color: #071320;
   transform: translateY(-1px);
 }
 
