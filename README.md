@@ -31,7 +31,6 @@
 - GUI:
   - `Add Circle Frame`
   - `Add Rectangle Frame`
-  - `Delete Selected Frame`
   - `Reset Simulation`
   - `Rebuild Film`
   - `Transform Mode` (`translate`, `rotate`, `scale`)
@@ -40,12 +39,15 @@
   - `Shape Retention` (spring toward initial film shape to resist collapse)
   - `Show Wireframe`
 - Mouse:
-  - Left-click a frame to select it
+  - Left-click selects a frame
+  - Middle mouse button pans the camera
+  - Right mouse button orbits the camera
+  - Mouse wheel zooms
   - Drag transform gizmo handles to move/rotate/scale
   - Empty-space clicks keep current selection (press `Escape` to deselect)
-  - Orbit the camera with standard Three.js OrbitControls
 - Keyboard:
   - `W` translate mode
   - `E` rotate mode
   - `R` scale mode
+  - `Delete` remove selected frame
   - `Escape` deselect current frame

@@ -46,4 +46,21 @@ describe('frame sampling', () => {
 
     expect(worldPoint.distanceTo(transformedLocal)).toBeLessThan(1e-7);
   });
+
+  it('samples rectangle loop without corner spikes', () => {
+    const rectangle = createDefaultFrameState('rect-2', 'rectangle');
+    rectangle.width = 3;
+    rectangle.height = 1.6;
+
+    const loop = sampleFrameBoundaryLocal(rectangle, 128);
+    const segmentLengths: number[] = [];
+    for (let i = 0; i < loop.length; i += 1) {
+      const next = loop[(i + 1) % loop.length];
+      segmentLengths.push(loop[i].distanceTo(next));
+    }
+
+    const averageLength = segmentLengths.reduce((sum, value) => sum + value, 0) / segmentLengths.length;
+    const maxLength = Math.max(...segmentLengths);
+    expect(maxLength).toBeLessThan(averageLength * 5);
+  });
 });

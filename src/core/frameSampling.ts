@@ -131,6 +131,6 @@ function pointOnRoundedRectSegment(
     return target.set(-hw, -hh + r + distance, 0);
   }
 
-  const angle = Math.PI + Math.PI * 0.5 - distance / r;
+  const angle = Math.PI - distance / r;
   return target.set(-hw + r + Math.cos(angle) * r, hh - r + Math.sin(angle) * r, 0);
 }

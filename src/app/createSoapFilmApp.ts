@@ -15,6 +15,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
+  MOUSE,
   Object3D,
   PCFSoftShadowMap,
   PerspectiveCamera,
@@ -34,7 +35,6 @@ import type { BoundaryConstraint, FilmState, FrameType, SoapFilmApp, SolverConfi
 import { createDefaultFrameState, sampleFrameBoundaryLocal, sampleFramePointLocal } from '../core/frameSampling';
 import { buildFilmTopology, type FrameRuntime } from '../core/filmTopology';
 import {
-  computeSurfaceArea,
   createFilmState,
   createSolverContext,
   resetFilmState,
@@ -63,12 +63,10 @@ interface UiState {
   relaxationStrength: number;
   shapeRetention: number;
   showWireframe: boolean;
-  surfaceArea: number;
 }
 
 interface SolverQualityConfig extends SolverConfig {
   normalsUpdateInterval: number;
-  areaUpdateInterval: number;
 }
 
 const FRAME_DEFAULT_POSITIONS: ReadonlyArray<readonly [number, number, number]> = [
@@ -89,7 +87,6 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
     relaxationStrength: 1,
     shapeRetention: 0,
     normalsUpdateInterval: 4,
-    areaUpdateInterval: 20,
   },
   balanced: {
     substeps: 4,
@@ -99,7 +96,6 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
     relaxationStrength: 1,
     shapeRetention: 0,
     normalsUpdateInterval: 2,
-    areaUpdateInterval: 12,
   },
   high: {
     substeps: 6,
@@ -109,7 +105,6 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
     relaxationStrength: 1,
     shapeRetention: 0,
     normalsUpdateInterval: 1,
-    areaUpdateInterval: 8,
   },
 };
 
@@ -140,12 +135,10 @@ class SoapFilmAppImpl implements SoapFilmApp {
     relaxationStrength: 1,
     shapeRetention: 0,
     showWireframe: false,
-    surfaceArea: 0,
   };
   private isTransformDragging = false;
   private isUsingTransformControls = false;
   private geometryUpdateCounter = 0;
-  private areaUpdateCounter = 0;
 
   private animationFrameHandle = 0;
   private readonly onResizeBound: () => void;
@@ -171,6 +164,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
     this.orbitControls.enableDamping = true;
     this.orbitControls.dampingFactor = 0.08;
+    this.orbitControls.mouseButtons.LEFT = undefined;
+    this.orbitControls.mouseButtons.MIDDLE = MOUSE.PAN;
+    this.orbitControls.mouseButtons.RIGHT = MOUSE.ROTATE;
 
     this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
     this.transformControls.setMode(this.uiState.transformMode);
@@ -305,9 +301,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
     }
 
     resetFilmState(this.filmRuntime.state);
-    this.uiState.surfaceArea = computeSurfaceArea(this.filmRuntime.state.positions, this.filmRuntime.state.indices);
     this.geometryUpdateCounter = 0;
-    this.areaUpdateCounter = 0;
     this.refreshFilmGeometry(true);
   }
 
@@ -320,7 +314,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const frameRuntimes = Array.from(this.frameEntities.values());
     const topology = buildFilmTopology(frameRuntimes, { spanSubdivisions: 24 });
     if (topology.indices.length === 0) {
-      this.uiState.surfaceArea = 0;
       return;
     }
 
@@ -388,9 +381,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
       (constraint) => this.sampleConstraintPoint(constraint),
       { computeSurfaceArea: false },
     );
-    this.uiState.surfaceArea = computeSurfaceArea(this.filmRuntime.state.positions, this.filmRuntime.state.indices);
     this.geometryUpdateCounter = 0;
-    this.areaUpdateCounter = 0;
 
     this.refreshFilmGeometry(true);
   }
@@ -455,24 +446,12 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const actions = {
       addCircle: () => this.addFrame('circle'),
       addRectangle: () => this.addFrame('rectangle'),
-      translateMode: () => this.setTransformMode('translate'),
-      rotateMode: () => this.setTransformMode('rotate'),
-      scaleMode: () => this.setTransformMode('scale'),
-      deleteSelected: () => {
-        if (this.selectedFrameId) {
-          this.removeFrame(this.selectedFrameId);
-        }
-      },
       resetSimulation: () => this.resetSimulation(),
       rebuildFilm: () => this.rebuildFilm(),
     };
 
     this.gui.add(actions, 'addCircle').name('Add Circle Frame');
     this.gui.add(actions, 'addRectangle').name('Add Rectangle Frame');
-    this.gui.add(actions, 'translateMode').name('Mode: Translate');
-    this.gui.add(actions, 'rotateMode').name('Mode: Rotate');
-    this.gui.add(actions, 'scaleMode').name('Mode: Scale');
-    this.gui.add(actions, 'deleteSelected').name('Delete Selected Frame');
     this.gui.add(actions, 'resetSimulation').name('Reset Simulation');
     this.gui.add(actions, 'rebuildFilm').name('Rebuild Film');
 
@@ -519,7 +498,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
         }
       });
 
-    this.gui.add(this.uiState, 'surfaceArea').name('Surface Area').listen();
   }
 
   private handleResize(): void {
@@ -545,6 +523,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const intersections = this.raycaster.intersectObjects(Array.from(this.frameSelectable));
     if (intersections.length === 0) {
+      this.selectFrame(null);
       return;
     }
 
@@ -569,6 +548,10 @@ class SoapFilmAppImpl implements SoapFilmApp {
     if (event.key === 'Escape') {
       this.selectFrame(null);
     }
+
+    if (event.key === 'Delete' && this.selectedFrameId) {
+      this.removeFrame(this.selectedFrameId);
+    }
   }
 
   private animationLoop = (): void => {
@@ -580,7 +563,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
     if (this.filmRuntime) {
       this.applySolverQualityConfig();
       const quality = SOLVER_QUALITY_CONFIGS[this.uiState.solverQuality];
-      const areaInterval = this.isTransformDragging ? Math.max(quality.areaUpdateInterval, 24) : quality.areaUpdateInterval;
 
       runRelaxationStep(
         this.filmRuntime.state,
@@ -590,17 +572,12 @@ class SoapFilmAppImpl implements SoapFilmApp {
       );
 
       this.geometryUpdateCounter += 1;
-      this.areaUpdateCounter += 1;
 
       const normalsInterval = this.isTransformDragging
         ? Math.max(quality.normalsUpdateInterval, 4)
         : quality.normalsUpdateInterval;
       const shouldRefreshNormals = this.geometryUpdateCounter % normalsInterval === 0;
       this.refreshFilmGeometry(shouldRefreshNormals);
-
-      if (this.areaUpdateCounter % areaInterval === 0) {
-        this.uiState.surfaceArea = computeSurfaceArea(this.filmRuntime.state.positions, this.filmRuntime.state.indices);
-      }
     }
 
     this.renderer.render(this.scene, this.camera);
