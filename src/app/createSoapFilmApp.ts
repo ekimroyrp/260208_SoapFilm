@@ -162,7 +162,7 @@ const SOLVER_SPEED_MIN = 0.1;
 const SOLVER_SPEED_MAX = 4;
 const BACK_SCALE_HANDLE_OFFSET = 0.4;
 const TRANSLATE_ARROW_HEAD_SCALE = 2 / 3;
-const CONTROL_POINT_RADIUS = 0.065;
+const CONTROL_POINT_WORLD_RADIUS = 0.04;
 const CONTROL_POINT_DEFAULT_COLOR = 0x2ecfff;
 const CONTROL_POINT_SELECTED_COLOR = 0xffffff;
 
@@ -180,9 +180,10 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly boundarySampleScratch = new Vector3();
+  private readonly worldScaleScratch = new Vector3();
   private readonly uiCleanupCallbacks: Array<() => void> = [];
   private readonly uiRangeBindings: UiRangeBinding[] = [];
-  private readonly controlPointGeometry = new SphereGeometry(CONTROL_POINT_RADIUS, 14, 10);
+  private readonly controlPointGeometry = new SphereGeometry(1, 14, 10);
   private readonly controlPointMaterial = new MeshBasicMaterial({ color: CONTROL_POINT_DEFAULT_COLOR });
   private readonly controlPointSelectedMaterial = new MeshBasicMaterial({ color: CONTROL_POINT_SELECTED_COLOR });
 
@@ -1116,6 +1117,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     this.orbitControls.update();
     this.updateFrameWorldMatrices();
+    this.updateControlPointHandleScales();
 
     if (this.filmRuntime) {
       this.filmRuntime.oilTimeUniform.value += deltaSeconds;
@@ -1138,6 +1140,23 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     this.renderer.render(this.scene, this.camera);
   };
+
+  private updateControlPointHandleScales(): void {
+    for (const frameEntity of this.frameEntities.values()) {
+      frameEntity.object.getWorldScale(this.worldScaleScratch);
+      const sx = Math.max(1e-4, Math.abs(this.worldScaleScratch.x));
+      const sy = Math.max(1e-4, Math.abs(this.worldScaleScratch.y));
+      const sz = Math.max(1e-4, Math.abs(this.worldScaleScratch.z));
+
+      for (const controlPoint of frameEntity.controlPoints) {
+        controlPoint.mesh.scale.set(
+          CONTROL_POINT_WORLD_RADIUS / sx,
+          CONTROL_POINT_WORLD_RADIUS / sy,
+          CONTROL_POINT_WORLD_RADIUS / sz,
+        );
+      }
+    }
+  }
 
   private refreshFilmGeometry(recomputeNormals: boolean): void {
     if (!this.filmRuntime) {
