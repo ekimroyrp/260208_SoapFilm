@@ -71,6 +71,7 @@ interface UiState {
   solverSpeed: number;
   relaxationStrength: number;
   shapeRetention: number;
+  stiffness: number;
   showWireframe: boolean;
 }
 
@@ -91,6 +92,8 @@ interface UiElements {
   relaxationStrengthValue: HTMLSpanElement;
   shapeRetentionRange: HTMLInputElement;
   shapeRetentionValue: HTMLSpanElement;
+  stiffnessRange: HTMLInputElement;
+  stiffnessValue: HTMLSpanElement;
   wireframeToggle: HTMLInputElement;
 }
 
@@ -133,6 +136,7 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
     laplacianWeight: 0.2,
     relaxationStrength: 1,
     shapeRetention: 0,
+    stiffness: 0.35,
     normalsUpdateInterval: 4,
   },
   balanced: {
@@ -142,6 +146,7 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
     laplacianWeight: 0.2,
     relaxationStrength: 1,
     shapeRetention: 0,
+    stiffness: 0.35,
     normalsUpdateInterval: 2,
   },
   high: {
@@ -151,6 +156,7 @@ const SOLVER_QUALITY_CONFIGS: Record<UiState['solverQuality'], SolverQualityConf
     laplacianWeight: 0.22,
     relaxationStrength: 1,
     shapeRetention: 0,
+    stiffness: 0.35,
     normalsUpdateInterval: 1,
   },
 };
@@ -210,6 +216,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
     solverSpeed: 1,
     relaxationStrength: 1,
     shapeRetention: 0,
+    stiffness: 0.35,
     showWireframe: false,
   };
   private isTransformDragging = false;
@@ -581,6 +588,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const relaxationStrengthValue = document.getElementById('relaxation-strength-value');
     const shapeRetentionRange = document.getElementById('shape-retention');
     const shapeRetentionValue = document.getElementById('shape-retention-value');
+    const stiffnessRange = document.getElementById('stiffness');
+    const stiffnessValue = document.getElementById('stiffness-value');
     const wireframeToggle = document.getElementById('show-wireframe');
 
     if (
@@ -600,6 +609,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
       !(relaxationStrengthValue instanceof HTMLSpanElement) ||
       !(shapeRetentionRange instanceof HTMLInputElement) ||
       !(shapeRetentionValue instanceof HTMLSpanElement) ||
+      !(stiffnessRange instanceof HTMLInputElement) ||
+      !(stiffnessValue instanceof HTMLSpanElement) ||
       !(wireframeToggle instanceof HTMLInputElement)
     ) {
       throw new Error('UI elements for controls panel are missing or invalid.');
@@ -622,6 +633,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
       relaxationStrengthValue,
       shapeRetentionRange,
       shapeRetentionValue,
+      stiffnessRange,
+      stiffnessValue,
       wireframeToggle,
     };
   }
@@ -673,6 +686,21 @@ class SoapFilmAppImpl implements SoapFilmApp {
         }
       },
       this.uiState.shapeRetention,
+    );
+
+    this.bindRangeControl(
+      {
+        input: this.uiElements.stiffnessRange,
+        value: this.uiElements.stiffnessValue,
+        format: (value) => value.toFixed(2),
+      },
+      (value) => {
+        this.uiState.stiffness = value;
+        if (this.filmRuntime) {
+          this.applySolverQualityConfig();
+        }
+      },
+      this.uiState.stiffness,
     );
 
     this.addDomListener(this.uiElements.addCircleButton, 'click', () => this.addFrame('circle'));
@@ -1234,6 +1262,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
     let laplacianWeight = baseConfig.laplacianWeight;
     let relaxationStrength = Math.min(2, Math.max(0.05, this.uiState.relaxationStrength));
     const shapeRetention = Math.min(0.5, Math.max(0, this.uiState.shapeRetention));
+    const stiffness = Math.min(10, Math.max(0, this.uiState.stiffness));
 
     if (this.isTransformDragging) {
       substeps = Math.min(
@@ -1256,6 +1285,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
       laplacianWeight,
       relaxationStrength,
       shapeRetention,
+      stiffness,
     };
   }
 

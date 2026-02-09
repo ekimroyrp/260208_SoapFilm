@@ -5,6 +5,7 @@ import type { FilmTopologyBuildResult } from './filmTopology';
 export interface SolverContext {
   boundaryMask: Uint8Array;
   neighbors: number[][];
+  neighborRestLengths: number[][];
   gradient: Float32Array;
   scratchPositions: Float32Array;
   scratchVelocities: Float32Array;
@@ -19,6 +20,7 @@ const DEFAULT_SOLVER_CONFIG: SolverConfig = {
   laplacianWeight: 0.2,
   relaxationStrength: 1,
   shapeRetention: 0,
+  stiffness: 0,
 };
 
 const EPSILON = 1e-8;
@@ -62,9 +64,29 @@ export function createSolverContext(filmState: FilmState): SolverContext {
     boundaryMask[constraint.vertexIndex] = 1;
   }
 
+  const neighborLists = neighbors.map((entry) => Array.from(entry));
+  const neighborRestLengths = neighborLists.map((neighborIndices, vertexIndex) => {
+    const vertexOffset = vertexIndex * 3;
+    const vx = filmState.restPositions[vertexOffset];
+    const vy = filmState.restPositions[vertexOffset + 1];
+    const vz = filmState.restPositions[vertexOffset + 2];
+
+    return neighborIndices.map((neighborIndex) => {
+      const neighborOffset = neighborIndex * 3;
+      const nx = filmState.restPositions[neighborOffset];
+      const ny = filmState.restPositions[neighborOffset + 1];
+      const nz = filmState.restPositions[neighborOffset + 2];
+      const dx = nx - vx;
+      const dy = ny - vy;
+      const dz = nz - vz;
+      return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    });
+  });
+
   return {
     boundaryMask,
-    neighbors: neighbors.map((entry) => Array.from(entry)),
+    neighbors: neighborLists,
+    neighborRestLengths,
     gradient: new Float32Array(filmState.positions.length),
     scratchPositions: new Float32Array(filmState.positions.length),
     scratchVelocities: new Float32Array(filmState.velocities.length),
@@ -81,9 +103,11 @@ export function runRelaxationStep(
     return 0;
   }
 
-  const { substeps, stepSize, damping, laplacianWeight, relaxationStrength, shapeRetention } = filmState.solverConfig;
+  const { substeps, stepSize, damping, laplacianWeight, relaxationStrength, shapeRetention, stiffness } =
+    filmState.solverConfig;
   const forceScale = Math.max(0, relaxationStrength);
   const retentionScale = Math.max(0, shapeRetention);
+  const stiffnessScale = Math.max(0, stiffness);
   for (let substep = 0; substep < substeps; substep += 1) {
     projectBoundaries(filmState, boundarySampler);
     solverContext.gradient.fill(0);
@@ -128,9 +152,39 @@ export function runRelaxationStep(
         lapZ = lapZ * invNeighbors - pz;
       }
 
-      const accelX = (-gx + laplacianWeight * lapX) * forceScale + (rx - px) * retentionScale;
-      const accelY = (-gy + laplacianWeight * lapY) * forceScale + (ry - py) * retentionScale;
-      const accelZ = (-gz + laplacianWeight * lapZ) * forceScale + (rz - pz) * retentionScale;
+      let springX = 0;
+      let springY = 0;
+      let springZ = 0;
+      if (stiffnessScale > 0 && neighbors.length > 0) {
+        const restLengths = solverContext.neighborRestLengths[vertexIndex];
+        for (let i = 0; i < neighbors.length; i += 1) {
+          const neighborIndex = neighbors[i];
+          const neighborOffset = neighborIndex * 3;
+          const dx = filmState.positions[neighborOffset] - px;
+          const dy = filmState.positions[neighborOffset + 1] - py;
+          const dz = filmState.positions[neighborOffset + 2] - pz;
+          const distanceSquared = dx * dx + dy * dy + dz * dz;
+          if (distanceSquared < EPSILON) {
+            continue;
+          }
+
+          const distance = Math.sqrt(distanceSquared);
+          const edgeError = distance - restLengths[i];
+          const edgeScale = edgeError / distance;
+          springX += dx * edgeScale;
+          springY += dy * edgeScale;
+          springZ += dz * edgeScale;
+        }
+
+        const invNeighbors = 1 / neighbors.length;
+        springX *= invNeighbors;
+        springY *= invNeighbors;
+        springZ *= invNeighbors;
+      }
+
+      const accelX = (-gx + laplacianWeight * lapX) * forceScale + (rx - px) * retentionScale + springX * stiffnessScale;
+      const accelY = (-gy + laplacianWeight * lapY) * forceScale + (ry - py) * retentionScale + springY * stiffnessScale;
+      const accelZ = (-gz + laplacianWeight * lapZ) * forceScale + (rz - pz) * retentionScale + springZ * stiffnessScale;
 
       const nextVelocityX = filmState.velocities[offset] * damping + accelX * stepSize;
       const nextVelocityY = filmState.velocities[offset + 1] * damping + accelY * stepSize;

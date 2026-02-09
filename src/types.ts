@@ -28,6 +28,7 @@ export interface SolverConfig {
   laplacianWeight: number;
   relaxationStrength: number;
   shapeRetention: number;
+  stiffness: number;
 }
 
 export interface FilmState {
