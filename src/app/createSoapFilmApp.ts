@@ -41,6 +41,8 @@ import {
 } from '../core/solver';
 
 interface FrameEntity extends FrameRuntime {
+  transformObject: Object3D;
+  scaleProxy: Object3D;
   line: LineLoop;
   material: LineBasicMaterial;
   controlPointGroup: Object3D;
@@ -160,6 +162,7 @@ const DRAG_RELAXATION_BOOST = 1.35;
 const DRAG_MAX_RELAXATION_STRENGTH = 3;
 const SOLVER_SPEED_MIN = 0.1;
 const SOLVER_SPEED_MAX = 4;
+const SCALE_EPSILON = 1e-4;
 const BACK_SCALE_HANDLE_OFFSET = 0.4;
 const TRANSLATE_ARROW_HEAD_SCALE = 2 / 3;
 const CONTROL_POINT_WORLD_RADIUS = 0.04;
@@ -298,10 +301,19 @@ class SoapFilmAppImpl implements SoapFilmApp {
   }
 
   private createFrameEntity(state: FrameState): FrameEntity {
+    const transformObject = new Object3D();
+    transformObject.position.copy(state.position);
+    transformObject.rotation.copy(state.rotation);
+
+    const scaleProxy = new Object3D();
+    scaleProxy.scale.set(
+      Math.max(SCALE_EPSILON, Math.abs(state.scale.x)),
+      Math.max(SCALE_EPSILON, Math.abs(state.scale.y)),
+      Math.max(SCALE_EPSILON, Math.abs(state.scale.z)),
+    );
+
     const object = new Object3D();
-    object.position.copy(state.position);
-    object.rotation.copy(state.rotation);
-    object.scale.copy(state.scale);
+    object.scale.set(this.getScaleSign(state.scale.x), this.getScaleSign(state.scale.y), this.getScaleSign(state.scale.z));
 
     const lineGeometry = new BufferGeometry().setFromPoints(sampleFrameBoundaryLocal(state, state.boundarySamples));
     const lineMaterial = new LineBasicMaterial({ color: 0xffffff });
@@ -331,14 +343,18 @@ class SoapFilmAppImpl implements SoapFilmApp {
       this.controlPointSelectable.add(handleMesh);
     }
 
+    transformObject.add(scaleProxy);
+    scaleProxy.add(object);
     object.add(line);
     object.add(controlPointGroup);
-    this.scene.add(object);
+    this.scene.add(transformObject);
 
     return {
       id: state.id,
       state,
       object,
+      transformObject,
+      scaleProxy,
       line,
       material: lineMaterial,
       controlPointGroup,
@@ -368,7 +384,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     frameEntity.object.remove(frameEntity.line);
     frameEntity.object.remove(frameEntity.controlPointGroup);
-    this.scene.remove(frameEntity.object);
+    frameEntity.scaleProxy.remove(frameEntity.object);
+    frameEntity.transformObject.remove(frameEntity.scaleProxy);
+    this.scene.remove(frameEntity.transformObject);
 
     this.frameEntities.delete(frameId);
     this.rebuildFilm();
@@ -497,7 +515,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
       frameEntity.material.dispose();
       frameEntity.object.remove(frameEntity.controlPointGroup);
       frameEntity.object.remove(frameEntity.line);
-      this.scene.remove(frameEntity.object);
+      frameEntity.scaleProxy.remove(frameEntity.object);
+      frameEntity.transformObject.remove(frameEntity.scaleProxy);
+      this.scene.remove(frameEntity.transformObject);
     }
     this.frameEntities.clear();
     this.frameSelectable.clear();
@@ -978,9 +998,10 @@ class SoapFilmAppImpl implements SoapFilmApp {
       return;
     }
 
-    for (const control of this.transformControls) {
-      control.attach(frameEntity.object);
-    }
+    const [translateControl, rotateControl, scaleControl] = this.transformControls;
+    translateControl?.attach(frameEntity.transformObject);
+    rotateControl?.attach(frameEntity.transformObject);
+    scaleControl?.attach(frameEntity.scaleProxy);
   }
 
   private selectControlPoint(frameId: string, controlPointIndex: number): void;
@@ -1061,9 +1082,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
       return;
     }
 
-    frameEntity.state.position.copy(frameEntity.object.position);
-    frameEntity.state.rotation.copy(frameEntity.object.rotation);
-    frameEntity.state.scale.copy(frameEntity.object.scale);
+    frameEntity.state.position.copy(frameEntity.transformObject.position);
+    frameEntity.state.rotation.copy(frameEntity.transformObject.rotation);
+    this.copyFrameScaleFromNodes(frameEntity, frameEntity.state.scale);
     this.syncFrameControlPointsFromHandles(frameEntity);
 
     this.frameClipboard = {
@@ -1183,7 +1204,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
   private updateFrameWorldMatrices(): void {
     for (const frameEntity of this.frameEntities.values()) {
-      frameEntity.object.updateMatrixWorld(true);
+      frameEntity.transformObject.updateMatrixWorld(true);
     }
   }
 
@@ -1231,9 +1252,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
   private syncFrameStatesFromObjects(): void {
     for (const frameEntity of this.frameEntities.values()) {
-      frameEntity.state.position.copy(frameEntity.object.position);
-      frameEntity.state.rotation.copy(frameEntity.object.rotation);
-      frameEntity.state.scale.copy(frameEntity.object.scale);
+      frameEntity.state.position.copy(frameEntity.transformObject.position);
+      frameEntity.state.rotation.copy(frameEntity.transformObject.rotation);
+      this.copyFrameScaleFromNodes(frameEntity, frameEntity.state.scale);
       this.syncFrameControlPointsFromHandles(frameEntity);
     }
   }
@@ -1321,6 +1342,11 @@ class SoapFilmAppImpl implements SoapFilmApp {
         this.setExclusiveTransformControl(null);
       }, 0);
     });
+    if (mode === 'scale') {
+      control.addEventListener('objectChange', () => {
+        this.handleScaleProxyObjectChange();
+      });
+    }
 
     const helper = control.getHelper();
     this.stripNonAxisTransformHandles(control, mode);
@@ -1354,6 +1380,23 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.refreshFrameLineGeometry(frameEntity);
   }
 
+  private handleScaleProxyObjectChange(): void {
+    if (!this.selectedFrameId) {
+      return;
+    }
+
+    const frameEntity = this.frameEntities.get(this.selectedFrameId);
+    if (!frameEntity) {
+      return;
+    }
+
+    frameEntity.scaleProxy.scale.set(
+      Math.max(SCALE_EPSILON, Math.abs(frameEntity.scaleProxy.scale.x)),
+      Math.max(SCALE_EPSILON, Math.abs(frameEntity.scaleProxy.scale.y)),
+      Math.max(SCALE_EPSILON, Math.abs(frameEntity.scaleProxy.scale.z)),
+    );
+  }
+
   private updateTransformDraggingState(): void {
     const wasDragging = this.isTransformDragging;
     const isDragging =
@@ -1380,8 +1423,20 @@ class SoapFilmAppImpl implements SoapFilmApp {
     }
   }
 
+  private getScaleSign(value: number): number {
+    return value < 0 ? -1 : 1;
+  }
+
+  private copyFrameScaleFromNodes(frameEntity: FrameEntity, target: Vector3): void {
+    target.set(
+      frameEntity.scaleProxy.scale.x * frameEntity.object.scale.x,
+      frameEntity.scaleProxy.scale.y * frameEntity.object.scale.y,
+      frameEntity.scaleProxy.scale.z * frameEntity.object.scale.z,
+    );
+  }
+
   private stripNonAxisTransformHandles(control: TransformControls, mode: 'translate' | 'rotate' | 'scale'): void {
-    const allowedHandleNames = new Set(['X', 'Y', 'Z']);
+    const allowedHandleNames = new Set(mode === 'scale' ? ['X', 'Y', 'Z', 'XYZ'] : ['X', 'Y', 'Z']);
     const internal = control as unknown as {
       _gizmo?: {
         gizmo?: Record<string, Object3D>;
