@@ -1360,7 +1360,14 @@ class SoapFilmAppImpl implements SoapFilmApp {
       return;
     }
 
-    const groups: Array<Object3D | undefined> = [gizmo.gizmo?.[mode], gizmo.picker?.[mode], gizmo.helper?.[mode]];
+    const helperGroup = gizmo.helper?.[mode];
+    if (helperGroup) {
+      for (const child of [...helperGroup.children]) {
+        helperGroup.remove(child);
+      }
+    }
+
+    const groups: Array<Object3D | undefined> = [gizmo.gizmo?.[mode], gizmo.picker?.[mode]];
     for (const group of groups) {
       if (!group) {
         continue;
