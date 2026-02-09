@@ -1259,14 +1259,24 @@ class SoapFilmAppImpl implements SoapFilmApp {
     control.setSpace('local');
     control.setSize(size);
     control.addEventListener('dragging-changed', () => {
+      if (control.dragging) {
+        this.setExclusiveTransformControl(control);
+      } else {
+        this.setExclusiveTransformControl(null);
+      }
       this.updateTransformDraggingState();
     });
     control.addEventListener('mouseDown', () => {
+      if (!this.getTransformControlAxis(control)) {
+        return;
+      }
+      this.setExclusiveTransformControl(control);
       this.isUsingTransformControls = true;
     });
     control.addEventListener('mouseUp', () => {
       window.setTimeout(() => {
         this.isUsingTransformControls = false;
+        this.setExclusiveTransformControl(null);
       }, 0);
     });
     control.addEventListener('objectChange', () => {
@@ -1291,14 +1301,24 @@ class SoapFilmAppImpl implements SoapFilmApp {
     control.setSpace('local');
     control.setSize(size);
     control.addEventListener('dragging-changed', () => {
+      if (control.dragging) {
+        this.setExclusiveTransformControl(control);
+      } else {
+        this.setExclusiveTransformControl(null);
+      }
       this.updateTransformDraggingState();
     });
     control.addEventListener('mouseDown', () => {
+      if (!this.getTransformControlAxis(control)) {
+        return;
+      }
+      this.setExclusiveTransformControl(control);
       this.isUsingTransformControls = true;
     });
     control.addEventListener('mouseUp', () => {
       window.setTimeout(() => {
         this.isUsingTransformControls = false;
+        this.setExclusiveTransformControl(null);
       }, 0);
     });
 
@@ -1342,6 +1362,21 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.orbitControls.enabled = !isDragging;
     if (!wasDragging && isDragging && this.filmRuntime) {
       this.filmRuntime.state.velocities.fill(0);
+    }
+  }
+
+  private getTransformControlAxis(control: TransformControls): string | null {
+    const axis = (control as unknown as { axis?: string | null }).axis;
+    if (typeof axis === 'string') {
+      return axis;
+    }
+    return null;
+  }
+
+  private setExclusiveTransformControl(activeControl: TransformControls | null): void {
+    const controls = [...this.transformControls, this.controlPointTransformControl];
+    for (const control of controls) {
+      control.enabled = !activeControl || control === activeControl;
     }
   }
 
