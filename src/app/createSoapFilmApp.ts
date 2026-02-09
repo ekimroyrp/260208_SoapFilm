@@ -163,6 +163,7 @@ const DRAG_MAX_RELAXATION_STRENGTH = 3;
 const SOLVER_SPEED_MIN = 0.1;
 const SOLVER_SPEED_MAX = 4;
 const SCALE_EPSILON = 1e-4;
+const ENVIRONMENT_BLUR_SIGMA = 1.25;
 const BACK_SCALE_HANDLE_OFFSET = 0.4;
 const TRANSLATE_ARROW_HEAD_SCALE = 2 / 3;
 const CONTROL_POINT_WORLD_RADIUS = 0.04;
@@ -548,7 +549,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private setupEnvironment(): void {
     const pmremGenerator = new PMREMGenerator(this.renderer);
     const roomEnvironment = new RoomEnvironment();
-    this.environmentRenderTarget = pmremGenerator.fromScene(roomEnvironment);
+    this.environmentRenderTarget = pmremGenerator.fromScene(roomEnvironment, ENVIRONMENT_BLUR_SIGMA);
     this.scene.environment = this.environmentRenderTarget.texture;
 
     roomEnvironment.dispose();
