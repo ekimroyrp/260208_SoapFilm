@@ -32,7 +32,7 @@
 - UI panel:
   - `Add Circle`
   - `Add Rectangle`
-  - `Mode` (`Move`, `Rotate`, `Scale`)
+  - `Mode` (`Gumball` combined Move/Rotate/Scale)
   - `Wireframe`
   - `Quality` (`Fast`, `Balanced`, `High`)
   - `Speed` (solver update speed scale)
@@ -47,9 +47,6 @@
   - Mouse wheel zooms
   - Drag transform gizmo handles to move/rotate/scale
 - Keyboard:
-  - `W` translate mode
-  - `E` rotate mode
-  - `R` scale mode
   - `Ctrl+C` copy selected frame (`Cmd+C` on macOS)
   - `Ctrl+V` paste copied frame (`Cmd+V` on macOS)
   - `Delete` remove selected frame

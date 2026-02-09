@@ -56,7 +56,6 @@ interface FilmRuntime {
 }
 
 interface UiState {
-  transformMode: 'translate' | 'rotate' | 'scale';
   solverQuality: 'fast' | 'balanced' | 'high';
   solverSpeed: number;
   relaxationStrength: number;
@@ -152,6 +151,8 @@ const DRAG_RELAXATION_BOOST = 1.35;
 const DRAG_MAX_RELAXATION_STRENGTH = 3;
 const SOLVER_SPEED_MIN = 0.1;
 const SOLVER_SPEED_MAX = 4;
+const BACK_SCALE_HANDLE_OFFSET = 0.4;
+const TRANSLATE_ARROW_HEAD_SCALE = 2 / 3;
 
 class SoapFilmAppImpl implements SoapFilmApp {
   private readonly canvas: HTMLCanvasElement;
@@ -159,8 +160,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private readonly scene: Scene;
   private readonly camera: PerspectiveCamera;
   private readonly orbitControls: OrbitControls;
-  private readonly transformControls: TransformControls;
-  private readonly transformControlsHelper: Object3D;
+  private readonly transformControls: TransformControls[];
+  private readonly transformControlHelpers: Object3D[];
   private readonly uiElements: UiElements;
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
@@ -178,7 +179,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private environmentRenderTarget: WebGLRenderTarget | null = null;
 
   private readonly uiState: UiState = {
-    transformMode: 'translate',
     solverQuality: 'balanced',
     solverSpeed: 1,
     relaxationStrength: 1,
@@ -218,28 +218,11 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.orbitControls.mouseButtons.MIDDLE = MOUSE.PAN;
     this.orbitControls.mouseButtons.RIGHT = MOUSE.ROTATE;
 
-    this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
-    this.transformControls.setMode(this.uiState.transformMode);
-    this.transformControls.setSpace('local');
-    this.transformControls.setSize(0.625);
-    this.transformControls.addEventListener('dragging-changed', (event) => {
-      const isDragging = Boolean((event as { value?: unknown }).value);
-      this.isTransformDragging = isDragging;
-      this.orbitControls.enabled = !isDragging;
-      if (isDragging && this.filmRuntime) {
-        this.filmRuntime.state.velocities.fill(0);
-      }
-    });
-    this.transformControls.addEventListener('mouseDown', () => {
-      this.isUsingTransformControls = true;
-    });
-    this.transformControls.addEventListener('mouseUp', () => {
-      window.setTimeout(() => {
-        this.isUsingTransformControls = false;
-      }, 0);
-    });
-    this.transformControlsHelper = this.transformControls.getHelper();
-    this.scene.add(this.transformControlsHelper);
+    const translateControl = this.createTransformControl('translate', 1.0);
+    const rotateControl = this.createTransformControl('rotate', 0.5);
+    const scaleControl = this.createTransformControl('scale', 0.42);
+    this.transformControls = [translateControl.control, rotateControl.control, scaleControl.control];
+    this.transformControlHelpers = [translateControl.helper, rotateControl.helper, scaleControl.helper];
 
     this.raycaster.params.Line = { threshold: 0.2 };
 
@@ -343,14 +326,18 @@ class SoapFilmAppImpl implements SoapFilmApp {
       frameEntity.material.color.setHex(id === frameId ? 0x00ffff : 0xffffff);
     }
 
-    this.transformControls.detach();
+    for (const control of this.transformControls) {
+      control.detach();
+    }
     if (!frameId) {
       return;
     }
 
     const frameEntity = this.frameEntities.get(frameId);
     if (frameEntity) {
-      this.transformControls.attach(frameEntity.object);
+      for (const control of this.transformControls) {
+        control.attach(frameEntity.object);
+      }
     }
   }
 
@@ -443,8 +430,12 @@ class SoapFilmAppImpl implements SoapFilmApp {
     }
     this.uiCleanupCallbacks.length = 0;
 
-    this.scene.remove(this.transformControlsHelper);
-    this.transformControls.dispose();
+    for (const helper of this.transformControlHelpers) {
+      this.scene.remove(helper);
+    }
+    for (const control of this.transformControls) {
+      control.dispose();
+    }
     this.orbitControls.dispose();
 
     for (const frameEntity of this.frameEntities.values()) {
@@ -545,7 +536,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
   }
 
   private setupUi(): void {
-    this.uiElements.transformModeSelect.value = this.uiState.transformMode;
+    this.uiElements.transformModeSelect.value = 'combined';
+    this.uiElements.transformModeSelect.disabled = true;
     this.uiElements.solverQualitySelect.value = this.uiState.solverQuality;
     this.uiElements.wireframeToggle.checked = this.uiState.showWireframe;
 
@@ -597,13 +589,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.addDomListener(this.uiElements.addCircleButton, 'click', () => this.addFrame('circle'));
     this.addDomListener(this.uiElements.addRectangleButton, 'click', () => this.addFrame('rectangle'));
     this.addDomListener(this.uiElements.resetSolverButton, 'click', () => this.rebuildFilm());
-
-    this.addDomListener(this.uiElements.transformModeSelect, 'change', () => {
-      const mode = this.uiElements.transformModeSelect.value as UiState['transformMode'];
-      if (mode === 'translate' || mode === 'rotate' || mode === 'scale') {
-        this.setTransformMode(mode);
-      }
-    });
 
     this.addDomListener(this.uiElements.solverQualitySelect, 'change', () => {
       const quality = this.uiElements.solverQualitySelect.value as UiState['solverQuality'];
@@ -820,18 +805,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
       }
     }
 
-    if (!hasModifier && (event.key === 'w' || event.key === 'W')) {
-      this.setTransformMode('translate');
-    }
-
-    if (!hasModifier && (event.key === 'e' || event.key === 'E')) {
-      this.setTransformMode('rotate');
-    }
-
-    if (!hasModifier && (event.key === 'r' || event.key === 'R')) {
-      this.setTransformMode('scale');
-    }
-
     if (!hasModifier && event.key === 'Escape') {
       this.selectFrame(null);
     }
@@ -954,15 +927,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
     }
   }
 
-  private setTransformMode(mode: UiState['transformMode']): void {
-    this.uiState.transformMode = mode;
-    if (this.uiElements.transformModeSelect.value !== mode) {
-      this.uiElements.transformModeSelect.value = mode;
-    }
-    this.transformControls.setMode(mode);
-    this.transformControls.setSpace('local');
-  }
-
   private getActiveSolverConfig(): SolverConfig {
     const baseConfig = SOLVER_QUALITY_CONFIGS[this.uiState.solverQuality];
     const speedScale = Math.min(SOLVER_SPEED_MAX, Math.max(SOLVER_SPEED_MIN, this.uiState.solverSpeed));
@@ -1026,6 +990,290 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.filmRuntime.wireframeMaterial.dispose();
 
     this.filmRuntime = null;
+  }
+
+  private createTransformControl(
+    mode: 'translate' | 'rotate' | 'scale',
+    size: number,
+  ): { control: TransformControls; helper: Object3D } {
+    const control = new TransformControls(this.camera, this.renderer.domElement);
+    control.setMode(mode);
+    control.setSpace('local');
+    control.setSize(size);
+    control.addEventListener('dragging-changed', () => {
+      this.updateTransformDraggingState();
+    });
+    control.addEventListener('mouseDown', () => {
+      this.isUsingTransformControls = true;
+    });
+    control.addEventListener('mouseUp', () => {
+      window.setTimeout(() => {
+        this.isUsingTransformControls = false;
+      }, 0);
+    });
+
+    const helper = control.getHelper();
+    this.stripNonAxisTransformHandles(control, mode);
+    if (mode === 'translate') {
+      this.stripTranslateBackArrows(control);
+      this.resizeTranslateArrowHeads(control, TRANSLATE_ARROW_HEAD_SCALE);
+    }
+    if (mode === 'scale') {
+      this.pushBackScaleHandles(control, BACK_SCALE_HANDLE_OFFSET);
+    }
+    this.scene.add(helper);
+    return { control, helper };
+  }
+
+  private updateTransformDraggingState(): void {
+    const wasDragging = this.isTransformDragging;
+    const isDragging = this.transformControls.some((control) => control.dragging);
+    this.isTransformDragging = isDragging;
+    this.orbitControls.enabled = !isDragging;
+    if (!wasDragging && isDragging && this.filmRuntime) {
+      this.filmRuntime.state.velocities.fill(0);
+    }
+  }
+
+  private stripNonAxisTransformHandles(control: TransformControls, mode: 'translate' | 'rotate' | 'scale'): void {
+    const allowedHandleNames = new Set(['X', 'Y', 'Z']);
+    const internal = control as unknown as {
+      _gizmo?: {
+        gizmo?: Record<string, Object3D>;
+        picker?: Record<string, Object3D>;
+        helper?: Record<string, Object3D>;
+      };
+    };
+
+    const gizmo = internal._gizmo;
+    if (!gizmo) {
+      return;
+    }
+
+    const groups: Array<Object3D | undefined> = [gizmo.gizmo?.[mode], gizmo.picker?.[mode], gizmo.helper?.[mode]];
+    for (const group of groups) {
+      if (!group) {
+        continue;
+      }
+      const toRemove = group.children.filter((child) => !allowedHandleNames.has(child.name));
+      for (const child of toRemove) {
+        group.remove(child);
+      }
+    }
+  }
+
+  private stripTranslateBackArrows(control: TransformControls): void {
+    const axisVectors: Record<'X' | 'Y' | 'Z', Vector3> = {
+      X: new Vector3(1, 0, 0),
+      Y: new Vector3(0, 1, 0),
+      Z: new Vector3(0, 0, 1),
+    };
+
+    const internal = control as unknown as {
+      _gizmo?: {
+        gizmo?: Record<string, Object3D>;
+        picker?: Record<string, Object3D>;
+      };
+    };
+
+    const gizmo = internal._gizmo;
+    if (!gizmo) {
+      return;
+    }
+
+    const groups: Array<Object3D | undefined> = [gizmo.gizmo?.translate, gizmo.picker?.translate];
+    for (const group of groups) {
+      if (!group) {
+        continue;
+      }
+
+      for (const axisName of ['X', 'Y', 'Z'] as const) {
+        const axisChildren = group.children.filter((child) => child.name === axisName);
+        if (axisChildren.length <= 1) {
+          continue;
+        }
+
+        const axisVector = axisVectors[axisName];
+        const toRemove: Object3D[] = [];
+
+        for (const child of axisChildren) {
+          const meshLike = child as Object3D & { geometry?: BufferGeometry };
+          const geometry = meshLike.geometry;
+          if (!geometry) {
+            continue;
+          }
+
+          geometry.computeBoundingBox();
+          const boundingBox = geometry.boundingBox;
+          if (!boundingBox) {
+            continue;
+          }
+
+          const center = boundingBox.getCenter(new Vector3());
+          const projection = center.dot(axisVector);
+          if (projection < -1e-4) {
+            toRemove.push(child);
+          }
+        }
+
+        for (const child of toRemove) {
+          group.remove(child);
+        }
+      }
+    }
+  }
+
+  private resizeTranslateArrowHeads(control: TransformControls, scaleFactor: number): void {
+    const axisVectors: Record<'X' | 'Y' | 'Z', Vector3> = {
+      X: new Vector3(1, 0, 0),
+      Y: new Vector3(0, 1, 0),
+      Z: new Vector3(0, 0, 1),
+    };
+
+    const internal = control as unknown as {
+      _gizmo?: {
+        gizmo?: Record<string, Object3D>;
+      };
+    };
+
+    const group = internal._gizmo?.gizmo?.translate;
+    if (!group) {
+      return;
+    }
+
+    for (const axisName of ['X', 'Y', 'Z'] as const) {
+      const axisVector = axisVectors[axisName];
+      for (const child of group.children) {
+        if (child.name !== axisName) {
+          continue;
+        }
+
+        const meshLike = child as Object3D & { geometry?: BufferGeometry };
+        const geometry = meshLike.geometry;
+        if (!geometry) {
+          continue;
+        }
+
+        geometry.computeBoundingBox();
+        const boundingBox = geometry.boundingBox;
+        if (!boundingBox) {
+          continue;
+        }
+
+        const center = boundingBox.getCenter(new Vector3());
+        const size = boundingBox.getSize(new Vector3());
+        const maxExtent = Math.max(size.x, size.y, size.z);
+        const minExtent = Math.min(size.x, size.y, size.z);
+
+        // Arrow heads are compact meshes near the positive axis tip.
+        const projection = center.dot(axisVector);
+        const isArrowHead = projection > 0.35 && maxExtent <= 0.16 && minExtent > 0.03;
+        if (!isArrowHead) {
+          continue;
+        }
+
+        const centerInv = center.clone().multiplyScalar(-1);
+        geometry.translate(centerInv.x, centerInv.y, centerInv.z);
+        geometry.scale(scaleFactor, scaleFactor, scaleFactor);
+        geometry.translate(center.x, center.y, center.z);
+      }
+    }
+  }
+
+  private pushBackScaleHandles(control: TransformControls, offset: number): void {
+    const axisVectors: Record<'X' | 'Y' | 'Z', Vector3> = {
+      X: new Vector3(1, 0, 0),
+      Y: new Vector3(0, 1, 0),
+      Z: new Vector3(0, 0, 1),
+    };
+
+    const internal = control as unknown as {
+      _gizmo?: {
+        gizmo?: Record<string, Object3D>;
+        picker?: Record<string, Object3D>;
+      };
+    };
+
+    const gizmo = internal._gizmo;
+    if (!gizmo) {
+      return;
+    }
+
+    const visualGroup = gizmo.gizmo?.scale;
+    if (visualGroup) {
+      for (const axisName of ['X', 'Y', 'Z'] as const) {
+        const axisVector = axisVectors[axisName];
+        const toRemove: Object3D[] = [];
+        for (const child of visualGroup.children) {
+          if (child.name !== axisName) {
+            continue;
+          }
+          const meshLike = child as Object3D & { geometry?: BufferGeometry };
+          const geometry = meshLike.geometry;
+          if (!geometry) {
+            continue;
+          }
+
+          geometry.computeBoundingBox();
+          const boundingBox = geometry.boundingBox;
+          if (!boundingBox) {
+            continue;
+          }
+
+          const size = boundingBox.getSize(new Vector3());
+          const maxExtent = Math.max(size.x, size.y, size.z);
+          if (maxExtent > 0.2) {
+            continue;
+          }
+
+          const center = boundingBox.getCenter(new Vector3());
+          const projection = center.dot(axisVector);
+          if (projection > 1e-4) {
+            toRemove.push(child);
+          } else if (projection < -1e-4) {
+            geometry.translate(-axisVector.x * offset, -axisVector.y * offset, -axisVector.z * offset);
+          }
+        }
+        for (const child of toRemove) {
+          visualGroup.remove(child);
+        }
+      }
+    }
+
+    const pickerGroup = gizmo.picker?.scale;
+    if (pickerGroup) {
+      for (const axisName of ['X', 'Y', 'Z'] as const) {
+        const axisVector = axisVectors[axisName];
+        const toRemove: Object3D[] = [];
+        for (const child of pickerGroup.children) {
+          if (child.name !== axisName) {
+            continue;
+          }
+          const meshLike = child as Object3D & { geometry?: BufferGeometry };
+          const geometry = meshLike.geometry;
+          if (!geometry) {
+            continue;
+          }
+
+          geometry.computeBoundingBox();
+          const boundingBox = geometry.boundingBox;
+          if (!boundingBox) {
+            continue;
+          }
+
+          const center = boundingBox.getCenter(new Vector3());
+          const projection = center.dot(axisVector);
+          if (projection > 1e-4) {
+            toRemove.push(child);
+          } else if (projection < -1e-4) {
+            geometry.translate(-axisVector.x * offset, -axisVector.y * offset, -axisVector.z * offset);
+          }
+        }
+        for (const child of toRemove) {
+          pickerGroup.remove(child);
+        }
+      }
+    }
   }
 
   private createSoapFilmMaterial(): { material: MeshPhysicalMaterial; oilTimeUniform: { value: number } } {
