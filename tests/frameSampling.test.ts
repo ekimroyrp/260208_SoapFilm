@@ -32,6 +32,29 @@ describe('frame sampling', () => {
     expect(rectStart.distanceTo(rectEnd)).toBeLessThan(1e-6);
   });
 
+  it('samples closed square and triangle loops with requested counts', () => {
+    const square = createDefaultFrameState('square-1', 'square');
+    square.width = 2.2;
+
+    const triangle = createDefaultFrameState('triangle-1', 'triangle');
+    triangle.width = 2.4;
+    triangle.height = 2;
+
+    const squareLoop = sampleFrameBoundaryLocal(square, 72);
+    const triangleLoop = sampleFrameBoundaryLocal(triangle, 72);
+
+    expect(squareLoop).toHaveLength(72);
+    expect(triangleLoop).toHaveLength(72);
+
+    const squareStart = sampleFramePointLocal(square, 0);
+    const squareEnd = sampleFramePointLocal(square, 1);
+    const triangleStart = sampleFramePointLocal(triangle, 0);
+    const triangleEnd = sampleFramePointLocal(triangle, 1);
+
+    expect(squareStart.distanceTo(squareEnd)).toBeLessThan(1e-6);
+    expect(triangleStart.distanceTo(triangleEnd)).toBeLessThan(1e-6);
+  });
+
   it('applies world transform correctly', () => {
     const frame = createDefaultFrameState('circle-2', 'circle');
     frame.radius = 1.25;

@@ -1,13 +1,15 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
-import type { FrameState } from '../types';
+import type { FrameState, FrameType } from '../types';
 
 const TWO_PI = Math.PI * 2;
-const DEFAULT_CONTROL_POINT_COUNTS: Record<'circle' | 'rectangle', number> = {
+const DEFAULT_CONTROL_POINT_COUNTS: Record<FrameType, number> = {
   circle: 12,
   rectangle: 12,
+  square: 12,
+  triangle: 12,
 };
 
-export function createDefaultFrameState(id: string, type: 'circle' | 'rectangle'): FrameState {
+export function createDefaultFrameState(id: string, type: FrameType): FrameState {
   const frame: FrameState = {
     id,
     type,
@@ -85,7 +87,48 @@ function sampleBaseFramePointLocal(
     return target.set(Math.cos(angle) * frame.radius, Math.sin(angle) * frame.radius, 0);
   }
 
+  if (frame.type === 'square') {
+    return sampleRoundedRectanglePoint(frame.width, frame.width, t, target);
+  }
+
+  if (frame.type === 'triangle') {
+    return sampleTrianglePoint(frame.width, frame.height, t, target);
+  }
+
   return sampleRoundedRectanglePoint(frame.width, frame.height, t, target);
+}
+
+function sampleTrianglePoint(width: number, height: number, t: number, target: Vector3): Vector3 {
+  const halfWidth = width * 0.5;
+  const halfHeight = height * 0.5;
+
+  const ax = 0;
+  const ay = halfHeight;
+  const bx = -halfWidth;
+  const by = -halfHeight;
+  const cx = halfWidth;
+  const cy = -halfHeight;
+
+  const abLength = Math.hypot(bx - ax, by - ay);
+  const bcLength = Math.hypot(cx - bx, cy - by);
+  const caLength = Math.hypot(ax - cx, ay - cy);
+  const perimeter = abLength + bcLength + caLength;
+
+  let distance = t * perimeter;
+  if (distance <= abLength) {
+    const alpha = abLength <= 1e-8 ? 0 : distance / abLength;
+    return target.set(ax + (bx - ax) * alpha, ay + (by - ay) * alpha, 0);
+  }
+
+  distance -= abLength;
+  if (distance <= bcLength) {
+    const alpha = bcLength <= 1e-8 ? 0 : distance / bcLength;
+    return target.set(bx + (cx - bx) * alpha, by + (cy - by) * alpha, 0);
+  }
+
+  distance -= bcLength;
+  const alpha = caLength <= 1e-8 ? 0 : distance / caLength;
+  return target.set(cx + (ax - cx) * alpha, cy + (ay - cy) * alpha, 0);
 }
 
 function sampleClosedCatmullRomPoint(controlPoints: Vector3[], curveParamT: number, target: Vector3): Vector3 {

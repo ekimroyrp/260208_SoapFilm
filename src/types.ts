@@ -1,6 +1,6 @@
 import type { Euler, Vector3 } from 'three';
 
-export type FrameType = 'circle' | 'rectangle';
+export type FrameType = 'circle' | 'rectangle' | 'square' | 'triangle';
 
 export interface FrameState {
   id: string;

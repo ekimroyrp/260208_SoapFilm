@@ -1,11 +1,11 @@
 # 260208_SoapFilm
 
-260208_SoapFilm is a Three.js-based interactive soap-film simulator inspired by Frei Otto style frame experiments. You can place circular and rectangular wire frames in a 3D scene, transform them, and observe a connected triangulated soap film that continuously relaxes toward a lower-area minimal-surface-like shape.
+260208_SoapFilm is a Three.js-based interactive soap-film simulator inspired by Frei Otto style frame experiments. You can place circle, square, rectangle, and triangle wire frames in a 3D scene, transform them, and observe a connected triangulated soap film that continuously relaxes toward a lower-area minimal-surface-like shape.
 
 ## Features
 
 - Vite + TypeScript + Three.js app scaffold
-- Add circle and rectangle frames from a custom draggable/collapsible in-app control panel
+- Add circle, square, rectangle, and triangle frames from a custom draggable/collapsible in-app control panel
 - Frame selection and 3D transform controls (move/rotate/scale)
 - Frame point-edit mode (double-click) with draggable control points for non-planar frame deformation
 - Connected film network generated from frame MST strip topology
@@ -32,8 +32,9 @@
 
 - UI panel:
   - `Add Circle`
+  - `Add Square`
   - `Add Rectangle`
-  - `Mode` (`Gumball` combined Move/Rotate/Scale)
+  - `Add Triangle`
   - `Wireframe`
   - `Quality` (`Fast`, `Balanced`, `High`)
   - `Speed` (solver update speed scale)

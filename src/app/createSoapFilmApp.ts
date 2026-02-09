@@ -81,6 +81,8 @@ interface UiElements {
   collapseToggle: HTMLButtonElement;
   addCircleButton: HTMLButtonElement;
   addRectangleButton: HTMLButtonElement;
+  addSquareButton: HTMLButtonElement;
+  addTriangleButton: HTMLButtonElement;
   resetSolverButton: HTMLButtonElement;
   solverQualitySelect: HTMLSelectElement;
   solverSpeedRange: HTMLInputElement;
@@ -280,9 +282,15 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     if (type === 'circle') {
       state.radius = 1;
-    } else {
+    } else if (type === 'rectangle') {
       state.width = 2;
       state.height = 1.4;
+    } else if (type === 'square') {
+      state.width = 2;
+      state.height = 2;
+    } else {
+      state.width = 2;
+      state.height = 1.8;
     }
 
     const placement = FRAME_DEFAULT_POSITIONS[this.frameEntities.size % FRAME_DEFAULT_POSITIONS.length];
@@ -563,6 +571,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const collapseToggle = document.getElementById('collapse-toggle');
     const addCircleButton = document.getElementById('add-circle');
     const addRectangleButton = document.getElementById('add-rectangle');
+    const addSquareButton = document.getElementById('add-square');
+    const addTriangleButton = document.getElementById('add-triangle');
     const resetSolverButton = document.getElementById('reset-solver');
     const solverQualitySelect = document.getElementById('solver-quality');
     const solverSpeedRange = document.getElementById('solver-speed');
@@ -580,6 +590,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
       !(collapseToggle instanceof HTMLButtonElement) ||
       !(addCircleButton instanceof HTMLButtonElement) ||
       !(addRectangleButton instanceof HTMLButtonElement) ||
+      !(addSquareButton instanceof HTMLButtonElement) ||
+      !(addTriangleButton instanceof HTMLButtonElement) ||
       !(resetSolverButton instanceof HTMLButtonElement) ||
       !(solverQualitySelect instanceof HTMLSelectElement) ||
       !(solverSpeedRange instanceof HTMLInputElement) ||
@@ -600,6 +612,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
       collapseToggle,
       addCircleButton,
       addRectangleButton,
+      addSquareButton,
+      addTriangleButton,
       resetSolverButton,
       solverQualitySelect,
       solverSpeedRange,
@@ -663,6 +677,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     this.addDomListener(this.uiElements.addCircleButton, 'click', () => this.addFrame('circle'));
     this.addDomListener(this.uiElements.addRectangleButton, 'click', () => this.addFrame('rectangle'));
+    this.addDomListener(this.uiElements.addSquareButton, 'click', () => this.addFrame('square'));
+    this.addDomListener(this.uiElements.addTriangleButton, 'click', () => this.addFrame('triangle'));
     this.addDomListener(this.uiElements.resetSolverButton, 'click', () => this.rebuildFilm());
 
     this.addDomListener(this.uiElements.solverQualitySelect, 'change', () => {
