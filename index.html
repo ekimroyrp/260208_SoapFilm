@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>260208_SoapFilm</title>
+    <script type="module" crossorigin src="./assets/index-C9e_tzKE.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/three-core-DfqISRBQ.js">
+    <link rel="modulepreload" crossorigin href="./assets/three-extras-CG5jZg23.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-DGmalZPj.css">
+  </head>
+  <body>
+    <div id="ui-panel">
+      <div id="ui-handle">
+        <button type="button" id="collapse-toggle" class="collapse-button" aria-label="Collapse controls" aria-expanded="true">
+          <span class="collapse-icon">v</span>
+        </button>
+      </div>
+      <div class="ui-body">
+        <div class="panel-section">
+          <button type="button" class="panel-heading" aria-expanded="true">
+            <span>Frames</span>
+            <span class="panel-chevron">v</span>
+          </button>
+          <div class="panel-content">
+            <div class="control">
+              <button type="button" id="add-circle" class="pill-button">Add Circle</button>
+            </div>
+            <div class="control">
+              <button type="button" id="add-square" class="pill-button">Add Square</button>
+            </div>
+            <div class="control">
+              <button type="button" id="add-rectangle" class="pill-button">Add Rectangle</button>
+            </div>
+            <div class="control">
+              <button type="button" id="add-triangle" class="pill-button">Add Triangle</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <button type="button" class="panel-heading" aria-expanded="true">
+            <span>Solver</span>
+            <span class="panel-chevron">v</span>
+          </button>
+          <div class="panel-content">
+            <label class="control">
+              <div class="control-row">
+                <span>Quality</span>
+                <select id="solver-quality" class="select-input">
+                  <option value="fast">Fast</option>
+                  <option value="balanced" selected>Balanced</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            </label>
+            <label class="control">
+              <div class="control-row">
+                <span>Speed</span>
+                <span id="solver-speed-value">1.00</span>
+              </div>
+              <input type="range" id="solver-speed" min="0.1" max="4" step="0.01" value="1" />
+            </label>
+            <label class="control">
+              <div class="control-row">
+                <span>Strength</span>
+                <span id="relaxation-strength-value">1.00</span>
+              </div>
+              <input type="range" id="relaxation-strength" min="0.05" max="2" step="0.01" value="1" />
+            </label>
+            <label class="control">
+              <div class="control-row">
+                <span>Retention</span>
+                <span id="shape-retention-value">0.00</span>
+              </div>
+              <input type="range" id="shape-retention" min="0" max="0.5" step="0.01" value="0" />
+            </label>
+            <label class="control">
+              <div class="control-row">
+                <span>Stiffness</span>
+                <span id="stiffness-value">0.35</span>
+              </div>
+              <input type="range" id="stiffness" min="0" max="10" step="0.01" value="0.35" />
+            </label>
+            <label class="control">
+              <div class="control-row">
+                <span>Wireframe</span>
+                <label class="switch">
+                  <input type="checkbox" id="show-wireframe" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </label>
+            <div class="control">
+              <button type="button" id="reset-solver" class="pill-button">Reset</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="ui-handle-bottom"></div>
+    </div>
+    <canvas id="app-canvas"></canvas>
+  </body>
+</html>
