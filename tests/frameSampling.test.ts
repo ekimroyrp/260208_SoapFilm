@@ -63,4 +63,17 @@ describe('frame sampling', () => {
     const maxLength = Math.max(...segmentLengths);
     expect(maxLength).toBeLessThan(averageLength * 5);
   });
+
+  it('supports non-planar control-point deformation', () => {
+    const frame = createDefaultFrameState('circle-3', 'circle');
+    frame.controlPoints[0].z = 0.7;
+    frame.controlPoints[3].z = -0.45;
+    frame.controlPoints[7].z = 0.35;
+
+    const loop = sampleFrameBoundaryLocal(frame, 96);
+    const maxAbsZ = Math.max(...loop.map((point) => Math.abs(point.z)));
+
+    expect(maxAbsZ).toBeGreaterThan(0.1);
+    expect(sampleFramePointLocal(frame, 0).distanceTo(sampleFramePointLocal(frame, 1))).toBeLessThan(1e-6);
+  });
 });

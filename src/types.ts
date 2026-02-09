@@ -12,6 +12,7 @@ export interface FrameState {
   width: number;
   height: number;
   boundarySamples: number;
+  controlPoints: Vector3[];
 }
 
 export interface BoundaryConstraint {

@@ -19,6 +19,7 @@ import {
   PMREMGenerator,
   Raycaster,
   Scene,
+  SphereGeometry,
   SRGBColorSpace,
   Vector2,
   Vector3,
@@ -42,6 +43,14 @@ import {
 interface FrameEntity extends FrameRuntime {
   line: LineLoop;
   material: LineBasicMaterial;
+  controlPointGroup: Object3D;
+  controlPoints: FrameControlPointEntity[];
+}
+
+interface FrameControlPointEntity {
+  index: number;
+  object: Object3D;
+  mesh: Mesh;
 }
 
 interface FilmRuntime {
@@ -94,6 +103,7 @@ interface FrameClipboardData {
   width: number;
   height: number;
   boundarySamples: number;
+  controlPoints: [number, number, number][];
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
@@ -153,6 +163,9 @@ const SOLVER_SPEED_MIN = 0.1;
 const SOLVER_SPEED_MAX = 4;
 const BACK_SCALE_HANDLE_OFFSET = 0.4;
 const TRANSLATE_ARROW_HEAD_SCALE = 2 / 3;
+const CONTROL_POINT_RADIUS = 0.065;
+const CONTROL_POINT_DEFAULT_COLOR = 0x2ecfff;
+const CONTROL_POINT_SELECTED_COLOR = 0xffffff;
 
 class SoapFilmAppImpl implements SoapFilmApp {
   private readonly canvas: HTMLCanvasElement;
@@ -162,16 +175,24 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private readonly orbitControls: OrbitControls;
   private readonly transformControls: TransformControls[];
   private readonly transformControlHelpers: Object3D[];
+  private readonly controlPointTransformControl: TransformControls;
+  private readonly controlPointTransformHelper: Object3D;
   private readonly uiElements: UiElements;
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly boundarySampleScratch = new Vector3();
   private readonly uiCleanupCallbacks: Array<() => void> = [];
   private readonly uiRangeBindings: UiRangeBinding[] = [];
+  private readonly controlPointGeometry = new SphereGeometry(CONTROL_POINT_RADIUS, 14, 10);
+  private readonly controlPointMaterial = new MeshBasicMaterial({ color: CONTROL_POINT_DEFAULT_COLOR });
+  private readonly controlPointSelectedMaterial = new MeshBasicMaterial({ color: CONTROL_POINT_SELECTED_COLOR });
 
   private readonly frameEntities = new Map<string, FrameEntity>();
   private readonly frameSelectable = new Set<Object3D>();
+  private readonly controlPointSelectable = new Set<Object3D>();
   private selectedFrameId: string | null = null;
+  private pointEditFrameId: string | null = null;
+  private selectedControlPoint: { frameId: string; controlPointIndex: number } | null = null;
   private frameClipboard: FrameClipboardData | null = null;
   private frameIdCounter = 0;
 
@@ -193,6 +214,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
   private animationFrameHandle = 0;
   private readonly onResizeBound: () => void;
   private readonly onPointerDownBound: (event: PointerEvent) => void;
+  private readonly onDoubleClickBound: (event: MouseEvent) => void;
   private readonly onKeyDownBound: (event: KeyboardEvent) => void;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -223,6 +245,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const scaleControl = this.createTransformControl('scale', 0.42);
     this.transformControls = [translateControl.control, rotateControl.control, scaleControl.control];
     this.transformControlHelpers = [translateControl.helper, rotateControl.helper, scaleControl.helper];
+    const controlPointTransform = this.createControlPointTransformControl(0.8);
+    this.controlPointTransformControl = controlPointTransform.control;
+    this.controlPointTransformHelper = controlPointTransform.helper;
 
     this.raycaster.params.Line = { threshold: 0.2 };
 
@@ -234,10 +259,12 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     this.onResizeBound = () => this.handleResize();
     this.onPointerDownBound = (event) => this.handlePointerDown(event);
+    this.onDoubleClickBound = (event) => this.handleDoubleClick(event);
     this.onKeyDownBound = (event) => this.handleKeyDown(event);
 
     window.addEventListener('resize', this.onResizeBound);
     this.canvas.addEventListener('pointerdown', this.onPointerDownBound);
+    this.canvas.addEventListener('dblclick', this.onDoubleClickBound);
     window.addEventListener('keydown', this.onKeyDownBound);
 
     this.animationLoop();
@@ -282,7 +309,30 @@ class SoapFilmAppImpl implements SoapFilmApp {
     line.userData.frameId = state.id;
     line.renderOrder = 5;
 
+    const controlPointGroup = new Object3D();
+    controlPointGroup.visible = false;
+    const controlPoints: FrameControlPointEntity[] = [];
+    for (let i = 0; i < state.controlPoints.length; i += 1) {
+      const handleObject = new Object3D();
+      handleObject.position.copy(state.controlPoints[i]);
+
+      const handleMesh = new Mesh(this.controlPointGeometry, this.controlPointMaterial);
+      handleMesh.userData.frameId = state.id;
+      handleMesh.userData.controlPointIndex = i;
+      handleMesh.renderOrder = 6;
+
+      handleObject.add(handleMesh);
+      controlPointGroup.add(handleObject);
+      controlPoints.push({
+        index: i,
+        object: handleObject,
+        mesh: handleMesh,
+      });
+      this.controlPointSelectable.add(handleMesh);
+    }
+
     object.add(line);
+    object.add(controlPointGroup);
     this.scene.add(object);
 
     return {
@@ -291,6 +341,8 @@ class SoapFilmAppImpl implements SoapFilmApp {
       object,
       line,
       material: lineMaterial,
+      controlPointGroup,
+      controlPoints,
     };
   }
 
@@ -300,15 +352,22 @@ class SoapFilmAppImpl implements SoapFilmApp {
       return;
     }
 
+    if (this.pointEditFrameId === frameId) {
+      this.exitPointEditMode();
+    }
     if (this.selectedFrameId === frameId) {
       this.selectFrame(null);
     }
 
     this.frameSelectable.delete(frameEntity.line);
+    for (const controlPoint of frameEntity.controlPoints) {
+      this.controlPointSelectable.delete(controlPoint.mesh);
+    }
     frameEntity.line.geometry.dispose();
     frameEntity.material.dispose();
 
     frameEntity.object.remove(frameEntity.line);
+    frameEntity.object.remove(frameEntity.controlPointGroup);
     this.scene.remove(frameEntity.object);
 
     this.frameEntities.delete(frameId);
@@ -320,25 +379,17 @@ class SoapFilmAppImpl implements SoapFilmApp {
       return;
     }
 
+    if (this.pointEditFrameId && this.pointEditFrameId !== frameId) {
+      this.exitPointEditMode();
+    }
+
     this.selectedFrameId = frameId;
 
     for (const [id, frameEntity] of this.frameEntities) {
       frameEntity.material.color.setHex(id === frameId ? 0x00ffff : 0xffffff);
     }
-
-    for (const control of this.transformControls) {
-      control.detach();
-    }
-    if (!frameId) {
-      return;
-    }
-
-    const frameEntity = this.frameEntities.get(frameId);
-    if (frameEntity) {
-      for (const control of this.transformControls) {
-        control.attach(frameEntity.object);
-      }
-    }
+    this.updateControlPointVisibility();
+    this.updateFrameTransformControlAttachments();
   }
 
   resetSimulation(): void {
@@ -423,6 +474,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
 
     window.removeEventListener('resize', this.onResizeBound);
     this.canvas.removeEventListener('pointerdown', this.onPointerDownBound);
+    this.canvas.removeEventListener('dblclick', this.onDoubleClickBound);
     window.removeEventListener('keydown', this.onKeyDownBound);
 
     for (const cleanup of this.uiCleanupCallbacks) {
@@ -436,16 +488,20 @@ class SoapFilmAppImpl implements SoapFilmApp {
     for (const control of this.transformControls) {
       control.dispose();
     }
+    this.scene.remove(this.controlPointTransformHelper);
+    this.controlPointTransformControl.dispose();
     this.orbitControls.dispose();
 
     for (const frameEntity of this.frameEntities.values()) {
       frameEntity.line.geometry.dispose();
       frameEntity.material.dispose();
+      frameEntity.object.remove(frameEntity.controlPointGroup);
       frameEntity.object.remove(frameEntity.line);
       this.scene.remove(frameEntity.object);
     }
     this.frameEntities.clear();
     this.frameSelectable.clear();
+    this.controlPointSelectable.clear();
 
     this.disposeFilmRuntime();
 
@@ -454,6 +510,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
       this.environmentRenderTarget = null;
     }
 
+    this.controlPointGeometry.dispose();
+    this.controlPointMaterial.dispose();
+    this.controlPointSelectedMaterial.dispose();
     this.renderer.dispose();
   }
 
@@ -773,20 +832,73 @@ class SoapFilmAppImpl implements SoapFilmApp {
       return;
     }
 
-    const rect = this.canvas.getBoundingClientRect();
-    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
+    this.updatePointerFromEvent(event);
     this.raycaster.setFromCamera(this.pointer, this.camera);
+
+    if (this.pointEditFrameId) {
+      const controlPointIntersections = this.raycaster.intersectObjects(Array.from(this.controlPointSelectable), false);
+      const matchingControlPointHit = controlPointIntersections.find(
+        (intersection) => (intersection.object.userData.frameId as string | undefined) === this.pointEditFrameId,
+      );
+      if (matchingControlPointHit) {
+        const frameId = matchingControlPointHit.object.userData.frameId as string | undefined;
+        const controlPointIndex = matchingControlPointHit.object.userData.controlPointIndex as number | undefined;
+        if (frameId && typeof controlPointIndex === 'number') {
+          this.selectControlPoint(frameId, controlPointIndex);
+          return;
+        }
+      }
+    }
+
     const intersections = this.raycaster.intersectObjects(Array.from(this.frameSelectable));
     if (intersections.length === 0) {
+      this.exitPointEditMode();
       this.selectFrame(null);
       return;
     }
 
     const selectedObject = intersections[0].object;
     const frameId = selectedObject.userData.frameId as string | undefined;
-    this.selectFrame(frameId ?? null);
+    if (!frameId) {
+      this.exitPointEditMode();
+      this.selectFrame(null);
+      return;
+    }
+
+    this.selectFrame(frameId);
+    if (this.pointEditFrameId === frameId) {
+      this.selectControlPoint(null);
+    }
+  }
+
+  private handleDoubleClick(event: MouseEvent): void {
+    if (event.button !== 0) {
+      return;
+    }
+    if (this.isUsingTransformControls || this.isTransformDragging) {
+      return;
+    }
+
+    this.updatePointerFromEvent(event);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const intersections = this.raycaster.intersectObjects(Array.from(this.frameSelectable));
+    if (intersections.length === 0) {
+      this.exitPointEditMode();
+      return;
+    }
+
+    const frameId = intersections[0].object.userData.frameId as string | undefined;
+    if (!frameId) {
+      this.exitPointEditMode();
+      return;
+    }
+
+    this.selectFrame(frameId);
+    if (this.pointEditFrameId === frameId) {
+      this.exitPointEditMode();
+    } else {
+      this.enterPointEditMode(frameId);
+    }
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
@@ -806,12 +918,142 @@ class SoapFilmAppImpl implements SoapFilmApp {
     }
 
     if (!hasModifier && event.key === 'Escape') {
-      this.selectFrame(null);
+      if (this.pointEditFrameId) {
+        this.exitPointEditMode();
+      } else {
+        this.selectFrame(null);
+      }
+      event.preventDefault();
     }
 
     if (!hasModifier && event.key === 'Delete' && this.selectedFrameId) {
       this.removeFrame(this.selectedFrameId);
     }
+  }
+
+  private updatePointerFromEvent(event: PointerEvent | MouseEvent): void {
+    const rect = this.canvas.getBoundingClientRect();
+    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  }
+
+  private enterPointEditMode(frameId: string): void {
+    const frameEntity = this.frameEntities.get(frameId);
+    if (!frameEntity || frameEntity.controlPoints.length === 0) {
+      return;
+    }
+
+    this.pointEditFrameId = frameId;
+    this.updateControlPointVisibility();
+    this.updateFrameTransformControlAttachments();
+    this.selectControlPoint(frameId, 0);
+  }
+
+  private exitPointEditMode(): void {
+    if (!this.pointEditFrameId && !this.selectedControlPoint) {
+      return;
+    }
+
+    this.pointEditFrameId = null;
+    this.selectControlPoint(null);
+    this.updateControlPointVisibility();
+    this.updateFrameTransformControlAttachments();
+  }
+
+  private updateControlPointVisibility(): void {
+    for (const [frameId, frameEntity] of this.frameEntities) {
+      frameEntity.controlPointGroup.visible = this.pointEditFrameId === frameId;
+    }
+  }
+
+  private updateFrameTransformControlAttachments(): void {
+    for (const control of this.transformControls) {
+      control.detach();
+    }
+
+    if (!this.selectedFrameId) {
+      return;
+    }
+    if (this.pointEditFrameId === this.selectedFrameId) {
+      return;
+    }
+
+    const frameEntity = this.frameEntities.get(this.selectedFrameId);
+    if (!frameEntity) {
+      return;
+    }
+
+    for (const control of this.transformControls) {
+      control.attach(frameEntity.object);
+    }
+  }
+
+  private selectControlPoint(frameId: string, controlPointIndex: number): void;
+  private selectControlPoint(frameId: null): void;
+  private selectControlPoint(frameId: string | null, controlPointIndex = -1): void {
+    if (!frameId || controlPointIndex < 0) {
+      this.selectedControlPoint = null;
+      this.controlPointTransformControl.detach();
+      this.refreshControlPointVisuals();
+      return;
+    }
+
+    const frameEntity = this.frameEntities.get(frameId);
+    if (!frameEntity) {
+      this.selectedControlPoint = null;
+      this.controlPointTransformControl.detach();
+      this.refreshControlPointVisuals();
+      return;
+    }
+
+    const controlPoint = frameEntity.controlPoints[controlPointIndex];
+    if (!controlPoint) {
+      return;
+    }
+
+    this.selectedControlPoint = { frameId, controlPointIndex };
+    this.controlPointTransformControl.attach(controlPoint.object);
+    this.refreshControlPointVisuals();
+  }
+
+  private refreshControlPointVisuals(): void {
+    for (const [frameId, frameEntity] of this.frameEntities) {
+      for (const controlPoint of frameEntity.controlPoints) {
+        const isSelected =
+          this.selectedControlPoint?.frameId === frameId &&
+          this.selectedControlPoint.controlPointIndex === controlPoint.index;
+        controlPoint.mesh.material = isSelected ? this.controlPointSelectedMaterial : this.controlPointMaterial;
+      }
+    }
+  }
+
+  private syncFrameControlPointsFromHandles(frameEntity: FrameEntity): void {
+    if (frameEntity.state.controlPoints.length !== frameEntity.controlPoints.length) {
+      frameEntity.state.controlPoints = frameEntity.controlPoints.map(() => new Vector3());
+    }
+
+    for (const controlPoint of frameEntity.controlPoints) {
+      frameEntity.state.controlPoints[controlPoint.index].copy(controlPoint.object.position);
+    }
+  }
+
+  private refreshFrameLineGeometry(frameEntity: FrameEntity): void {
+    const samples = sampleFrameBoundaryLocal(frameEntity.state, frameEntity.state.boundarySamples);
+    const geometry = frameEntity.line.geometry as BufferGeometry;
+    const positionAttribute = geometry.getAttribute('position') as BufferAttribute | undefined;
+    if (!positionAttribute || positionAttribute.count !== samples.length) {
+      frameEntity.line.geometry.dispose();
+      frameEntity.line.geometry = new BufferGeometry().setFromPoints(samples);
+      frameEntity.line.computeLineDistances?.();
+      return;
+    }
+
+    for (let i = 0; i < samples.length; i += 1) {
+      const point = samples[i];
+      positionAttribute.setXYZ(i, point.x, point.y, point.z);
+    }
+    positionAttribute.needsUpdate = true;
+    geometry.computeBoundingSphere();
   }
 
   private copySelectedFrame(): void {
@@ -827,6 +1069,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
     frameEntity.state.position.copy(frameEntity.object.position);
     frameEntity.state.rotation.copy(frameEntity.object.rotation);
     frameEntity.state.scale.copy(frameEntity.object.scale);
+    this.syncFrameControlPointsFromHandles(frameEntity);
 
     this.frameClipboard = {
       type: frameEntity.state.type,
@@ -834,6 +1077,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
       width: frameEntity.state.width,
       height: frameEntity.state.height,
       boundarySamples: frameEntity.state.boundarySamples,
+      controlPoints: frameEntity.state.controlPoints.map((point) => [point.x, point.y, point.z]),
       position: [frameEntity.state.position.x, frameEntity.state.position.y, frameEntity.state.position.z],
       rotation: [frameEntity.state.rotation.x, frameEntity.state.rotation.y, frameEntity.state.rotation.z],
       scale: [frameEntity.state.scale.x, frameEntity.state.scale.y, frameEntity.state.scale.z],
@@ -851,6 +1095,9 @@ class SoapFilmAppImpl implements SoapFilmApp {
     state.width = this.frameClipboard.width;
     state.height = this.frameClipboard.height;
     state.boundarySamples = this.frameClipboard.boundarySamples;
+    state.controlPoints = this.frameClipboard.controlPoints.map(
+      (point) => new Vector3(point[0], point[1], point[2]),
+    );
 
     state.position.set(
       this.frameClipboard.position[0] + 0.5,
@@ -974,6 +1221,7 @@ class SoapFilmAppImpl implements SoapFilmApp {
       frameEntity.state.position.copy(frameEntity.object.position);
       frameEntity.state.rotation.copy(frameEntity.object.rotation);
       frameEntity.state.scale.copy(frameEntity.object.scale);
+      this.syncFrameControlPointsFromHandles(frameEntity);
     }
   }
 
@@ -990,6 +1238,35 @@ class SoapFilmAppImpl implements SoapFilmApp {
     this.filmRuntime.wireframeMaterial.dispose();
 
     this.filmRuntime = null;
+  }
+
+  private createControlPointTransformControl(size: number): { control: TransformControls; helper: Object3D } {
+    const control = new TransformControls(this.camera, this.renderer.domElement);
+    control.setMode('translate');
+    control.setSpace('local');
+    control.setSize(size);
+    control.addEventListener('dragging-changed', () => {
+      this.updateTransformDraggingState();
+    });
+    control.addEventListener('mouseDown', () => {
+      this.isUsingTransformControls = true;
+    });
+    control.addEventListener('mouseUp', () => {
+      window.setTimeout(() => {
+        this.isUsingTransformControls = false;
+      }, 0);
+    });
+    control.addEventListener('objectChange', () => {
+      this.handleControlPointObjectChange();
+    });
+
+    this.stripNonAxisTransformHandles(control, 'translate');
+    this.stripTranslateBackArrows(control);
+    this.resizeTranslateArrowHeads(control, TRANSLATE_ARROW_HEAD_SCALE);
+
+    const helper = control.getHelper();
+    this.scene.add(helper);
+    return { control, helper };
   }
 
   private createTransformControl(
@@ -1025,9 +1302,29 @@ class SoapFilmAppImpl implements SoapFilmApp {
     return { control, helper };
   }
 
+  private handleControlPointObjectChange(): void {
+    if (!this.selectedControlPoint) {
+      return;
+    }
+
+    const frameEntity = this.frameEntities.get(this.selectedControlPoint.frameId);
+    if (!frameEntity) {
+      return;
+    }
+
+    const controlPoint = frameEntity.controlPoints[this.selectedControlPoint.controlPointIndex];
+    if (!controlPoint) {
+      return;
+    }
+
+    frameEntity.state.controlPoints[controlPoint.index].copy(controlPoint.object.position);
+    this.refreshFrameLineGeometry(frameEntity);
+  }
+
   private updateTransformDraggingState(): void {
     const wasDragging = this.isTransformDragging;
-    const isDragging = this.transformControls.some((control) => control.dragging);
+    const isDragging =
+      this.controlPointTransformControl.dragging || this.transformControls.some((control) => control.dragging);
     this.isTransformDragging = isDragging;
     this.orbitControls.enabled = !isDragging;
     if (!wasDragging && isDragging && this.filmRuntime) {

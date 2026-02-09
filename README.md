@@ -7,6 +7,7 @@
 - Vite + TypeScript + Three.js app scaffold
 - Add circle and rectangle frames from a custom draggable/collapsible in-app control panel
 - Frame selection and 3D transform controls (move/rotate/scale)
+- Frame point-edit mode (double-click) with draggable control points for non-planar frame deformation
 - Connected film network generated from frame MST strip topology
 - Continuous relaxation solver with fixed boundary constraints
 - Solver controls for quality, speed, strength, and retention
@@ -42,6 +43,8 @@
 - Mouse:
   - Left-click selects a frame
   - Left-click empty space deselects the current frame
+  - Double-click a selected frame to toggle point edit mode
+  - In point edit mode, click a control point and drag its gizmo to deform the frame in 3D
   - Middle mouse button pans the camera
   - Right mouse button orbits the camera
   - Mouse wheel zooms
@@ -50,4 +53,4 @@
   - `Ctrl+C` copy selected frame (`Cmd+C` on macOS)
   - `Ctrl+V` paste copied frame (`Cmd+V` on macOS)
   - `Delete` remove selected frame
-  - `Escape` deselect current frame
+  - `Escape` exits point edit mode (if active), otherwise deselects current frame
