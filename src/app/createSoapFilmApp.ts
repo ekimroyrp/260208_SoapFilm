@@ -80,7 +80,6 @@ interface UiElements {
   addCircleButton: HTMLButtonElement;
   addRectangleButton: HTMLButtonElement;
   resetSolverButton: HTMLButtonElement;
-  transformModeSelect: HTMLSelectElement;
   solverQualitySelect: HTMLSelectElement;
   solverSpeedRange: HTMLInputElement;
   solverSpeedValue: HTMLSpanElement;
@@ -543,7 +542,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
     const addCircleButton = document.getElementById('add-circle');
     const addRectangleButton = document.getElementById('add-rectangle');
     const resetSolverButton = document.getElementById('reset-solver');
-    const transformModeSelect = document.getElementById('transform-mode');
     const solverQualitySelect = document.getElementById('solver-quality');
     const solverSpeedRange = document.getElementById('solver-speed');
     const solverSpeedValue = document.getElementById('solver-speed-value');
@@ -561,7 +559,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
       !(addCircleButton instanceof HTMLButtonElement) ||
       !(addRectangleButton instanceof HTMLButtonElement) ||
       !(resetSolverButton instanceof HTMLButtonElement) ||
-      !(transformModeSelect instanceof HTMLSelectElement) ||
       !(solverQualitySelect instanceof HTMLSelectElement) ||
       !(solverSpeedRange instanceof HTMLInputElement) ||
       !(solverSpeedValue instanceof HTMLSpanElement) ||
@@ -582,7 +579,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
       addCircleButton,
       addRectangleButton,
       resetSolverButton,
-      transformModeSelect,
       solverQualitySelect,
       solverSpeedRange,
       solverSpeedValue,
@@ -595,8 +591,6 @@ class SoapFilmAppImpl implements SoapFilmApp {
   }
 
   private setupUi(): void {
-    this.uiElements.transformModeSelect.value = 'combined';
-    this.uiElements.transformModeSelect.disabled = true;
     this.uiElements.solverQualitySelect.value = this.uiState.solverQuality;
     this.uiElements.wireframeToggle.checked = this.uiState.showWireframe;
 
